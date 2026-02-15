@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 import requests
 
@@ -33,39 +33,7 @@ class APISportsClient:
             raise ValueError(f"Unexpected API response shape from {url}")
         return payload
 
-    def get_fixture_outcome(self, fixture_id: int) -> FixtureOutcome:
-        payload = self._get("fixtures", {"id": fixture_id})
-        rows = payload.get("response", [])
-        if not rows:
-            raise ValueError(f"Fixture not found for id={fixture_id}")
-
-        row = rows[0]
-        fixture = row.get("fixture", {})
-        goals = row.get("goals", {})
-        score = row.get("score", {})
-
-        status_short = (fixture.get("status", {}) or {}).get("short", "")
-        halftime = score.get("halftime") or {}
-        fulltime = score.get("fulltime") or {}
-        penalty = score.get("penalty") or {}
-
-        fulltime_home = fulltime.get("home")
-        fulltime_away = fulltime.get("away")
-        home_goals = fulltime_home if fulltime_home is not None else goals.get("home")
-        away_goals = fulltime_away if fulltime_away is not None else goals.get("away")
-
-        return FixtureOutcome(
-            fixture_id=fixture_id,
-            status_short=status_short,
-            home_goals=home_goals,
-            away_goals=away_goals,
-            halftime_home=halftime.get("home"),
-            halftime_away=halftime.get("away"),
-            fulltime_home=fulltime_home,
-            fulltime_away=fulltime_away,
-            penalty_home=penalty.get("home"),
-            penalty_away=penalty.get("away"),
-        )
+    # ── helpers ──────────────────────────────────────────────────────────────
 
     @staticmethod
     def _to_int(value: Any) -> int | None:
@@ -81,6 +49,86 @@ class APISportsClient:
                 return int(cleaned)
         return None
 
+    @staticmethod
+    def is_final_status(status_short: str) -> bool:
+        return status_short in FINAL_STATUSES
+
+    # ── fixture outcome (scores + events) ────────────────────────────────────
+
+    def get_fixture_outcome(self, fixture_id: int) -> FixtureOutcome:
+        payload = self._get("fixtures", {"id": fixture_id})
+        rows = payload.get("response", [])
+        if not rows:
+            raise ValueError(f"Fixture not found for id={fixture_id}")
+
+        row = rows[0]
+        fixture = row.get("fixture", {})
+        goals = row.get("goals", {})
+        score = row.get("score", {})
+        teams = row.get("teams", {})
+        events: List[Dict[str, Any]] = row.get("events") or []
+
+        status_short = (fixture.get("status", {}) or {}).get("short", "")
+        halftime = score.get("halftime") or {}
+        fulltime = score.get("fulltime") or {}
+        penalty = score.get("penalty") or {}
+
+        fulltime_home = fulltime.get("home")
+        fulltime_away = fulltime.get("away")
+        home_goals = fulltime_home if fulltime_home is not None else goals.get("home")
+        away_goals = fulltime_away if fulltime_away is not None else goals.get("away")
+
+        # Determine first / last team to score from events
+        home_team_id = (teams.get("home") or {}).get("id")
+        first_to_score, last_to_score = self._parse_scorers(events, home_team_id, home_goals, away_goals)
+
+        return FixtureOutcome(
+            fixture_id=fixture_id,
+            status_short=status_short,
+            home_goals=home_goals,
+            away_goals=away_goals,
+            halftime_home=halftime.get("home"),
+            halftime_away=halftime.get("away"),
+            fulltime_home=fulltime_home,
+            fulltime_away=fulltime_away,
+            penalty_home=penalty.get("home"),
+            penalty_away=penalty.get("away"),
+            first_to_score=first_to_score,
+            last_to_score=last_to_score,
+        )
+
+    @staticmethod
+    def _parse_scorers(
+        events: List[Dict[str, Any]],
+        home_team_id: Any,
+        home_goals: Any,
+        away_goals: Any,
+    ) -> tuple[str | None, str | None]:
+        """Return (first_to_score, last_to_score) as 'HOME'/'AWAY'/'NONE'."""
+        goal_events = []
+        for ev in events:
+            if (ev.get("type") or "").lower() != "goal":
+                continue
+            detail = (ev.get("detail") or "").lower()
+            if "missed" in detail:
+                continue
+            elapsed = (ev.get("time") or {}).get("elapsed") or 0
+            extra = (ev.get("time") or {}).get("extra") or 0
+            team_id = (ev.get("team") or {}).get("id")
+            side = "HOME" if team_id == home_team_id else "AWAY"
+            goal_events.append((elapsed, extra, side))
+
+        if not goal_events:
+            # 0-0 or no event data
+            if home_goals is not None and away_goals is not None and home_goals == 0 and away_goals == 0:
+                return "NONE", "NONE"
+            return None, None
+
+        goal_events.sort(key=lambda g: (g[0], g[1]))
+        return goal_events[0][2], goal_events[-1][2]
+
+    # ── fixture statistics ───────────────────────────────────────────────────
+
     def get_fixture_statistics(self, fixture_id: int) -> FixtureStatistics:
         payload = self._get("fixtures/statistics", {"fixture": fixture_id})
         rows = payload.get("response", [])
@@ -89,7 +137,7 @@ class APISportsClient:
 
         stats_by_team: list[dict[str, Any]] = []
         for row in rows:
-            team_stats = {}
+            team_stats: dict[str, Any] = {}
             for stat in row.get("statistics", []):
                 key = (stat.get("type") or "").strip().upper()
                 team_stats[key] = self._to_int(stat.get("value"))
@@ -105,25 +153,28 @@ class APISportsClient:
             yellow_away=away_stats.get("YELLOW CARDS"),
             red_home=home_stats.get("RED CARDS"),
             red_away=away_stats.get("RED CARDS"),
+            shots_home=home_stats.get("TOTAL SHOTS"),
+            shots_away=away_stats.get("TOTAL SHOTS"),
+            shots_on_target_home=home_stats.get("SHOTS ON GOAL"),
+            shots_on_target_away=away_stats.get("SHOTS ON GOAL"),
+            fouls_home=home_stats.get("FOULS"),
+            fouls_away=away_stats.get("FOULS"),
+            offsides_home=home_stats.get("OFFSIDES"),
+            offsides_away=away_stats.get("OFFSIDES"),
         )
+
+    # ── odds catalog ─────────────────────────────────────────────────────────
 
     def get_odds_bets_catalog(self) -> list[dict[str, Any]]:
         payload = self._get("odds/bets", {})
         rows = payload.get("response", [])
         catalog: list[dict[str, Any]] = []
         for row in rows:
-            item_id = row.get("id")
-            item_name = row.get("name")
-            values = row.get("values") or []
             catalog.append(
                 {
-                    "id": item_id,
-                    "name": item_name,
-                    "values": values,
+                    "id": row.get("id"),
+                    "name": row.get("name"),
+                    "values": row.get("values") or [],
                 }
             )
         return catalog
-
-    @staticmethod
-    def is_final_status(status_short: str) -> bool:
-        return status_short in FINAL_STATUSES
