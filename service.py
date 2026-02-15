@@ -894,6 +894,10 @@ def parse_raw_bet(raw: str) -> dict:
         _desc = _pipe_parts[0].strip()
         _choice = _pipe_parts[1].strip()
 
+        # Strip bookmaker noise from description (INC.TS, INCL.TS, etc.)
+        _desc = _NOISE_RE.sub(' ', _desc).strip()
+        _desc = re.sub(r'\s{2,}', ' ', _desc)
+
         # ── Combo selections with + (can't evaluate as single market) ──
         if "+" in _desc and "+" in _choice:
             return {"market": "UNMAPPED", "pick": s,
@@ -970,6 +974,16 @@ def parse_raw_bet(raw: str) -> dict:
             else:
                 return {"market": "MULTI_GOALS", "pick": f"{_lo}-{_hi}"}
 
+        # ── 1X2 STAT | 1/X/2 (stat comparison: "1X2 FUORIGIOCO | 2" → MOST_OFFSIDES/AWAY) ──
+        _1x2_stat_m = re.match(r'^1X2\s+(.+)$', _desc)
+        if _1x2_stat_m:
+            _stat = _1x2_stat_m.group(1).strip()
+            _most_mkt = _PREFIX_TO_MOST_MARKET.get(_stat)
+            if _most_mkt:
+                _pk = _R_MAP.get(_choice)
+                if _pk:
+                    return {"market": _most_mkt, "pick": _pk}
+
         # ── 1° TEMPO / PRIMO TEMPO / HT | 1/X/2/GG/NG ──
         if re.match(
             r'^(?:1\s*TEMPO|PRIMO\s+TEMPO|1T|PT|1H|HT|FIRST\s+HALF|1ST\s+HALF)'
@@ -1001,6 +1015,33 @@ def parse_raw_bet(raw: str) -> dict:
     s = _NOISE_RE.sub(' ', s).strip()
     # Collapse multiple spaces
     s = re.sub(r'\s{2,}', ' ', s)
+    # Strip trailing odds-like numbers (e.g. "U/O 4.5 CARTELLINI OVER 1.80" → remove "1.80")
+    s = re.sub(r'\s+\d+\.\d{2}$', '', s)
+
+    # ═══ Non-pipe U/O format: "U/O LINE STAT OVER/UNDER" ═══
+    _uo_np = re.match(
+        r'^U/?O\s+(\d+(?:\.\d+)?)\s+(.+?)\s+(OVER|UNDER|O|U)$',
+        s, re.IGNORECASE,
+    )
+    if _uo_np:
+        _line = float(_uo_np.group(1))
+        _stat = _uo_np.group(2).strip().upper()
+        _pk = "OVER" if _uo_np.group(3).upper().startswith("O") else "UNDER"
+        _uo_stat_map = {
+            "CARTELLINI": "CARDS_OVER_UNDER", "AMMONIZIONI": "CARDS_OVER_UNDER",
+            "CARD": "CARDS_OVER_UNDER", "CARDS": "CARDS_OVER_UNDER",
+            "CORNER": "CORNERS_OVER_UNDER", "CORNERS": "CORNERS_OVER_UNDER",
+            "ANGOLI": "CORNERS_OVER_UNDER",
+            "TIRI": "SHOTS_OVER_UNDER", "SHOTS": "SHOTS_OVER_UNDER",
+            "TIRI IN PORTA": "SHOTS_ON_TARGET_OVER_UNDER",
+            "SOT": "SHOTS_ON_TARGET_OVER_UNDER",
+            "SHOTS ON TARGET": "SHOTS_ON_TARGET_OVER_UNDER",
+            "FALLI": "FOULS_OVER_UNDER", "FOULS": "FOULS_OVER_UNDER",
+            "FUORIGIOCO": "OFFSIDES_OVER_UNDER", "OFFSIDES": "OFFSIDES_OVER_UNDER",
+            "GOL": "OVER_UNDER", "GOAL": "OVER_UNDER", "GOALS": "OVER_UNDER",
+        }
+        _mkt = _uo_stat_map.get(_stat, "OVER_UNDER")
+        return {"market": _mkt, "pick": _pk, "line": _line}
 
     # ═══ Prefixed Over/Under (corners, cards, shots, halves, etc.) ═══
     m = _PREFIXED_OU_RE.match(s)
@@ -1252,9 +1293,9 @@ def parse_raw_bet(raw: str) -> dict:
 
 
 class SmartBetRow(BaseModel):
-    date: str = Field(min_length=1, description="Match date DD-MM-YYYY or DD/MM/YYYY")
-    event: str = Field(min_length=1, description="e.g. Napoli - Como")
-    bet: str = Field(min_length=1, description="e.g. 1, X, 2, OVER 2.5, GG")
+    date: str = Field(default="", description="Match date DD-MM-YYYY or DD/MM/YYYY")
+    event: str = Field(default="", description="e.g. Napoli - Como")
+    bet: str = Field(default="", description="e.g. 1, X, 2, OVER 2.5, GG")
     odds: Optional[float] = Field(default=None, description="Odds (informational)")
 
 
@@ -1416,6 +1457,10 @@ def validate_betslip_smart(payload: SmartValidationRequest) -> dict:
     resolution_log: list[dict] = []
 
     for row in payload.rows:
+        # Skip filler rows (e.g. "Quota Totale" with empty fields from OCR)
+        if not row.date.strip() or not row.event.strip() or not row.bet.strip():
+            continue
+
         # Parse date
         try:
             api_date = _parse_date(row.date)
