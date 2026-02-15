@@ -725,6 +725,62 @@ def _result_offsides_over_under(sel: Selection, stats: Optional[FixtureStatistic
     return _settle_ou(sel, _total_value(stats, "offsides_home", "offsides_away"), "Total offsides")
 
 
+# ── Stat comparison evaluators (which team has more) ──
+
+def _settle_most(sel: Selection, home_val: Optional[int], away_val: Optional[int], label: str) -> SelectionResult:
+    """Settle a 'most X' market: pick = HOME / AWAY / DRAW(EQUAL)."""
+    if home_val is None or away_val is None:
+        return _r(sel, P, f"Missing {label} statistics")
+    pick = sel.pick.upper()
+    if pick == "HOME":
+        status = W if home_val > away_val else L
+    elif pick == "AWAY":
+        status = W if away_val > home_val else L
+    elif pick in ("DRAW", "EQUAL", "X"):
+        status = W if home_val == away_val else L
+    else:
+        return _r(sel, P, f"Unknown pick '{sel.pick}' for {label}")
+    return _r(sel, status, f"{label}: home={home_val}, away={away_val}")
+
+
+def _result_most_corners(sel: Selection, stats: Optional[FixtureStatistics]) -> SelectionResult:
+    if stats is None:
+        return _r(sel, P, "Missing fixture statistics")
+    return _settle_most(sel, stats.corners_home, stats.corners_away, "Corners")
+
+
+def _result_most_cards(sel: Selection, stats: Optional[FixtureStatistics]) -> SelectionResult:
+    if stats is None:
+        return _r(sel, P, "Missing fixture statistics")
+    h = (stats.yellow_home or 0) + (stats.red_home or 0)
+    a = (stats.yellow_away or 0) + (stats.red_away or 0)
+    return _settle_most(sel, h, a, "Cards")
+
+
+def _result_most_offsides(sel: Selection, stats: Optional[FixtureStatistics]) -> SelectionResult:
+    if stats is None:
+        return _r(sel, P, "Missing fixture statistics")
+    return _settle_most(sel, stats.offsides_home, stats.offsides_away, "Offsides")
+
+
+def _result_most_fouls(sel: Selection, stats: Optional[FixtureStatistics]) -> SelectionResult:
+    if stats is None:
+        return _r(sel, P, "Missing fixture statistics")
+    return _settle_most(sel, stats.fouls_home, stats.fouls_away, "Fouls")
+
+
+def _result_most_shots(sel: Selection, stats: Optional[FixtureStatistics]) -> SelectionResult:
+    if stats is None:
+        return _r(sel, P, "Missing fixture statistics")
+    return _settle_most(sel, stats.shots_home, stats.shots_away, "Shots")
+
+
+def _result_most_shots_on_target(sel: Selection, stats: Optional[FixtureStatistics]) -> SelectionResult:
+    if stats is None:
+        return _r(sel, P, "Missing fixture statistics")
+    return _settle_most(sel, stats.shots_on_target_home, stats.shots_on_target_away, "Shots on target")
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 #  Registry
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -787,6 +843,13 @@ STATS_MARKET_EVALUATORS: dict[Market, Callable[[Selection, Optional[FixtureStati
     Market.SHOTS_ON_TARGET_OVER_UNDER: _result_shots_on_target_over_under,
     Market.FOULS_OVER_UNDER: _result_fouls_over_under,
     Market.OFFSIDES_OVER_UNDER: _result_offsides_over_under,
+    # Comparison markets
+    Market.MOST_CORNERS: _result_most_corners,
+    Market.MOST_CARDS: _result_most_cards,
+    Market.MOST_OFFSIDES: _result_most_offsides,
+    Market.MOST_FOULS: _result_most_fouls,
+    Market.MOST_SHOTS: _result_most_shots,
+    Market.MOST_SHOTS_ON_TARGET: _result_most_shots_on_target,
 }
 
 

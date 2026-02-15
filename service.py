@@ -59,11 +59,20 @@ class SelectionIn(BaseModel):
             Market.SHOTS_OVER_UNDER, Market.SHOTS_ON_TARGET_OVER_UNDER,
             Market.FOULS_OVER_UNDER, Market.OFFSIDES_OVER_UNDER,
         }
+        _most_markets = {
+            Market.MOST_CORNERS, Market.MOST_CARDS, Market.MOST_OFFSIDES,
+            Market.MOST_FOULS, Market.MOST_SHOTS, Market.MOST_SHOTS_ON_TARGET,
+        }
         if m in _ou_markets:
             if self.pick not in {"OVER", "UNDER"}:
                 raise ValueError(f"{m.value} pick must be OVER or UNDER")
             if self.line is None:
                 raise ValueError(f"{m.value} requires line")
+
+        # ── stat comparison (most X) ──
+        if m in _most_markets:
+            if self.pick not in {"HOME", "AWAY", "DRAW"}:
+                raise ValueError(f"{m.value} pick must be HOME, AWAY or DRAW")
 
         # ── team over/under family ──
         _team_ou = {
@@ -474,6 +483,14 @@ _MARKET_ALIASES: dict[str, Market] = {
     "OFFSIDES_OVER_UNDER": Market.OFFSIDES_OVER_UNDER,
     "TOTAL_OFFSIDES": Market.OFFSIDES_OVER_UNDER,
     "OFFSIDES_OU": Market.OFFSIDES_OVER_UNDER,
+
+    # ── Stat comparison (most) ──
+    "MOST_CORNERS": Market.MOST_CORNERS,
+    "MOST_CARDS": Market.MOST_CARDS,
+    "MOST_OFFSIDES": Market.MOST_OFFSIDES,
+    "MOST_FOULS": Market.MOST_FOULS,
+    "MOST_SHOTS": Market.MOST_SHOTS,
+    "MOST_SHOTS_ON_TARGET": Market.MOST_SHOTS_ON_TARGET,
 }
 
 
@@ -711,31 +728,30 @@ _RESULT_OU_RE = re.compile(
 )
 
 # Stat-category + team pattern: "FUORIGIOCO 2", "ANGOLI 1", "CARTELLINI CASA"
+# These are "MOST" comparison markets — which team has more of the stat
 _STAT_TEAM_RE = re.compile(
     r"^(CORNER|CORNERS|CRN|ANGOLI|CALCI D'ANGOLO|"
     r"CARD|CARDS|YC|YELLOW|YELLOW CARDS?|CARTELLINI|AMMONIZIONI|"
     r"SHOT|SHOTS|SOT|SHOTS ON TARGET|TIRI|TIRI IN PORTA|"
     r"FOUL|FOULS|FALLI|"
     r"OFFSIDE|OFFSIDES|FUORIGIOCO)"
-    r"\s+(1|2|HOME|AWAY|CASA|OSPITE)$",
+    r"\s+(1|2|X|HOME|AWAY|DRAW|CASA|OSPITE|PAREGGIO|PARI)$",
     re.IGNORECASE,
 )
-_PREFIX_TO_TEAM_MARKET = {
-    "CORNER": "TEAM_CORNERS_OVER_UNDER", "CORNERS": "TEAM_CORNERS_OVER_UNDER",
-    "CRN": "TEAM_CORNERS_OVER_UNDER", "ANGOLI": "TEAM_CORNERS_OVER_UNDER",
-    "CALCI D'ANGOLO": "TEAM_CORNERS_OVER_UNDER",
-    "CARD": "TEAM_CARDS_OVER_UNDER", "CARDS": "TEAM_CARDS_OVER_UNDER",
-    "YC": "TEAM_CARDS_OVER_UNDER", "YELLOW": "TEAM_CARDS_OVER_UNDER",
-    "YELLOW CARD": "TEAM_CARDS_OVER_UNDER", "YELLOW CARDS": "TEAM_CARDS_OVER_UNDER",
-    "CARTELLINI": "TEAM_CARDS_OVER_UNDER", "AMMONIZIONI": "TEAM_CARDS_OVER_UNDER",
-    # For shots/fouls/offsides there's no team variant in Market enum,
-    # so we keep the total market but tag with team
-    "SHOT": "SHOTS_OVER_UNDER", "SHOTS": "SHOTS_OVER_UNDER", "TIRI": "SHOTS_OVER_UNDER",
-    "SOT": "SHOTS_ON_TARGET_OVER_UNDER", "SHOTS ON TARGET": "SHOTS_ON_TARGET_OVER_UNDER",
-    "TIRI IN PORTA": "SHOTS_ON_TARGET_OVER_UNDER",
-    "FOUL": "FOULS_OVER_UNDER", "FOULS": "FOULS_OVER_UNDER", "FALLI": "FOULS_OVER_UNDER",
-    "OFFSIDE": "OFFSIDES_OVER_UNDER", "OFFSIDES": "OFFSIDES_OVER_UNDER",
-    "FUORIGIOCO": "OFFSIDES_OVER_UNDER",
+_PREFIX_TO_MOST_MARKET = {
+    "CORNER": "MOST_CORNERS", "CORNERS": "MOST_CORNERS",
+    "CRN": "MOST_CORNERS", "ANGOLI": "MOST_CORNERS",
+    "CALCI D'ANGOLO": "MOST_CORNERS",
+    "CARD": "MOST_CARDS", "CARDS": "MOST_CARDS",
+    "YC": "MOST_CARDS", "YELLOW": "MOST_CARDS",
+    "YELLOW CARD": "MOST_CARDS", "YELLOW CARDS": "MOST_CARDS",
+    "CARTELLINI": "MOST_CARDS", "AMMONIZIONI": "MOST_CARDS",
+    "SHOT": "MOST_SHOTS", "SHOTS": "MOST_SHOTS", "TIRI": "MOST_SHOTS",
+    "SOT": "MOST_SHOTS_ON_TARGET", "SHOTS ON TARGET": "MOST_SHOTS_ON_TARGET",
+    "TIRI IN PORTA": "MOST_SHOTS_ON_TARGET",
+    "FOUL": "MOST_FOULS", "FOULS": "MOST_FOULS", "FALLI": "MOST_FOULS",
+    "OFFSIDE": "MOST_OFFSIDES", "OFFSIDES": "MOST_OFFSIDES",
+    "FUORIGIOCO": "MOST_OFFSIDES",
 }
 
 # Noise patterns Italian bookmakers append (e.g. "INC.TS", "INCL.TS")
@@ -870,16 +886,17 @@ def parse_raw_bet(raw: str) -> dict:
             result["team"] = "HOME"  # default, user can override
         return result
 
-    # ═══ Stat + Team ("FUORIGIOCO 2", "ANGOLI CASA", "CARTELLINI 1") ═══
+    # ═══ Stat + Team comparison ("FUORIGIOCO 2", "ANGOLI CASA", "CARTELLINI 1") ═══
+    # "FUORIGIOCO 2" = away team has more offsides → MOST_OFFSIDES / AWAY
     m = _STAT_TEAM_RE.match(s)
     if m:
         prefix = m.group(1).upper()
         team_raw = m.group(2).upper()
-        team = _HA_MAP.get(team_raw, team_raw)
-        market = _PREFIX_TO_TEAM_MARKET.get(prefix)
+        # Map pick: 1/HOME/CASA → HOME, 2/AWAY/OSPITE → AWAY, X/DRAW → DRAW
+        pick = _R_MAP.get(team_raw, _HA_MAP.get(team_raw, team_raw))
+        market = _PREFIX_TO_MOST_MARKET.get(prefix)
         if market:
-            # Return as team-specific stat (no line — the evaluator uses total stats)
-            return {"market": market, "pick": "OVER", "line": 0.5, "team": team}
+            return {"market": market, "pick": pick}
 
     # ═══ Result + O/U combo ("1/OVER 2.5", "HOME+OVER 2.5") ═══
     m = _RESULT_OU_RE.match(s)
