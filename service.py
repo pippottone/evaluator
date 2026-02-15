@@ -649,90 +649,102 @@ def _row_to_selection(row: TableRowIn) -> Selection:
 _OVER_UNDER_RE = re.compile(r"^(OVER|UNDER|O|U)\s*(\d+(?:\.\d+)?)$", re.IGNORECASE)
 _SCORE_RE = re.compile(r"^(\d+)\s*[-:]\s*(\d+)$")
 _PREFIXED_OU_RE = re.compile(
-    r"^(CORNER|CORNERS|CRN|"
-    r"CARD|CARDS|YC|YELLOW|YELLOW CARDS?|"
-    r"SHOT|SHOTS|SOT|SHOTS ON TARGET|"
-    r"FOUL|FOULS|"
-    r"OFFSIDE|OFFSIDES|"
+    r"^(CORNER|CORNERS|CRN|ANGOLI|CALCI D'ANGOLO|"
+    r"CARD|CARDS|YC|YELLOW|YELLOW CARDS?|CARTELLINI|AMMONIZIONI|"
+    r"SHOT|SHOTS|SOT|SHOTS ON TARGET|TIRI|TIRI IN PORTA|"
+    r"FOUL|FOULS|FALLI|"
+    r"OFFSIDE|OFFSIDES|FUORIGIOCO|"
     r"TEAM CORNER|TEAM CORNERS|"
     r"TEAM CARD|TEAM CARDS|"
     r"TEAM GOAL|TEAM GOALS|TEAM|"
-    r"1H|HT|1ST HALF|FIRST HALF|"
-    r"2H|2ND HALF|SECOND HALF|"
-    r"BOTH HALVES|BH)"
+    r"1H|HT|1ST HALF|FIRST HALF|PT|1T|PRIMO TEMPO|"
+    r"2H|2ND HALF|SECOND HALF|ST|2T|SECONDO TEMPO|"
+    r"BOTH HALVES|BH|ENTRAMBI I TEMPI)"
     r"\s+(OVER|UNDER|O|U)\s*(\d+(?:\.\d+)?)$",
     re.IGNORECASE,
 )
 _HANDICAP_RE = re.compile(
-    r"^(AH|HANDICAP|HC|H)\s*(HOME|AWAY|1|2)\s*([+-]?\d+(?:\.\d+)?)$",
+    r"^(AH|HANDICAP|HC|H)\s*(HOME|AWAY|CASA|OSPITE|1|2)\s*([+-]?\d+(?:\.\d+)?)$",
     re.IGNORECASE,
 )
 _HANDICAP_ALT_RE = re.compile(
-    r"^(HOME|AWAY|1|2)\s*([+-]\d+(?:\.\d+)?)$",
+    r"^(HOME|AWAY|CASA|OSPITE|1|2)\s*([+-]\d+(?:\.\d+)?)$",
     re.IGNORECASE,
 )
-_EXACT_GOALS_RE = re.compile(r"^(EXACT|EXACTLY)\s*(\d+)\s*(GOALS?)?$", re.IGNORECASE)
-_MULTI_GOALS_RE = re.compile(r"^(\d+)\s*-\s*(\d+)\s*(GOALS?)?$")
+_EXACT_GOALS_RE = re.compile(r"^(EXACT|EXACTLY|ESATTO|ESATTAMENTE)\s*(\d+)\s*(GOALS?|GOL)?$", re.IGNORECASE)
+_MULTI_GOALS_RE = re.compile(r"^(\d+)\s*-\s*(\d+)\s*(GOALS?|GOL)?$", re.IGNORECASE)
 _MARGIN_RE = re.compile(
-    r"^(HOME|AWAY|1|2)\s+BY\s+(\d+)(\+)?$",
+    r"^(HOME|AWAY|CASA|OSPITE|1|2)\s+(BY|DI|CON)\s+(\d+)(\+)?$",
     re.IGNORECASE,
 )
 _HT_1X2_RE = re.compile(
-    r"^(1H|HT|1ST HALF|FIRST HALF)\s+(1|X|2|HOME|DRAW|AWAY)$",
+    r"^(1H|HT|1ST HALF|FIRST HALF|PT|1T|PRIMO TEMPO)\s+(1|X|2|HOME|DRAW|AWAY|CASA|PAREGGIO|OSPITE)$",
     re.IGNORECASE,
 )
 _2H_1X2_RE = re.compile(
-    r"^(2H|2ND HALF|SECOND HALF)\s+(1|X|2|HOME|DRAW|AWAY)$",
+    r"^(2H|2ND HALF|SECOND HALF|ST|2T|SECONDO TEMPO)\s+(1|X|2|HOME|DRAW|AWAY|CASA|PAREGGIO|OSPITE)$",
     re.IGNORECASE,
 )
 _HT_SCORE_RE = re.compile(
-    r"^(HT|1H|1ST HALF)\s+(\d+)\s*[-:]\s*(\d+)$",
+    r"^(HT|1H|1ST HALF|PT|1T|PRIMO TEMPO)\s+(\d+)\s*[-:]\s*(\d+)$",
     re.IGNORECASE,
 )
 _2H_SCORE_RE = re.compile(
-    r"^(2H|2ND HALF)\s+(\d+)\s*[-:]\s*(\d+)$",
+    r"^(2H|2ND HALF|ST|2T|SECONDO TEMPO)\s+(\d+)\s*[-:]\s*(\d+)$",
     re.IGNORECASE,
 )
 _HT_GG_RE = re.compile(
-    r"^(HT|1H|1ST HALF)\s+(GG|NG|YES|NO|BTTS)$",
+    r"^(HT|1H|1ST HALF|PT|1T|PRIMO TEMPO)\s+(GG|NG|GOL|NOGOL|NO GOL|YES|NO|BTTS|SI)$",
     re.IGNORECASE,
 )
 _2H_GG_RE = re.compile(
-    r"^(2H|2ND HALF)\s+(GG|NG|YES|NO|BTTS)$",
+    r"^(2H|2ND HALF|ST|2T|SECONDO TEMPO)\s+(GG|NG|GOL|NOGOL|NO GOL|YES|NO|BTTS|SI)$",
     re.IGNORECASE,
 )
 _RESULT_BTTS_RE = re.compile(
-    r"^(1|X|2|HOME|DRAW|AWAY)\s*[/&+\s]\s*(GG|NG|YES|NO|BTTS)$",
+    r"^(1|X|2|HOME|DRAW|AWAY|CASA|PAREGGIO|OSPITE)\s*[/&+\s]\s*(GG|NG|GOL|NOGOL|NO GOL|YES|NO|BTTS|SI)$",
     re.IGNORECASE,
 )
 _RESULT_OU_RE = re.compile(
-    r"^(1|X|2|HOME|DRAW|AWAY)\s*[/&+\s]\s*(OVER|UNDER|O|U)\s*(\d+(?:\.\d+)?)$",
+    r"^(1|X|2|HOME|DRAW|AWAY|CASA|PAREGGIO|OSPITE)\s*[/&+\s]\s*(OVER|UNDER|O|U)\s*(\d+(?:\.\d+)?)$",
     re.IGNORECASE,
 )
 
 # Lookup helpers
-_R_MAP = {"1": "HOME", "H": "HOME", "HOME": "HOME",
-           "X": "DRAW", "D": "DRAW", "DRAW": "DRAW",
-           "2": "AWAY", "A": "AWAY", "AWAY": "AWAY"}
+_R_MAP = {"1": "HOME", "H": "HOME", "HOME": "HOME", "CASA": "HOME",
+           "X": "DRAW", "D": "DRAW", "DRAW": "DRAW", "PAREGGIO": "DRAW",
+           "2": "AWAY", "A": "AWAY", "AWAY": "AWAY", "OSPITE": "AWAY", "FUORI": "AWAY"}
 _B_MAP = {"GG": "YES", "YES": "YES", "Y": "YES", "BTTS": "YES",
-           "NG": "NO", "NO": "NO", "N": "NO"}
-_HA_MAP = {"1": "HOME", "HOME": "HOME", "2": "AWAY", "AWAY": "AWAY"}
+           "GOL": "YES", "SI": "YES",
+           "NG": "NO", "NO": "NO", "N": "NO",
+           "NOGOL": "NO", "NO GOL": "NO"}
+_HA_MAP = {"1": "HOME", "HOME": "HOME", "CASA": "HOME",
+           "2": "AWAY", "AWAY": "AWAY", "OSPITE": "AWAY", "FUORI": "AWAY"}
 _PREFIX_TO_MARKET = {
     "CORNER": "CORNERS_OVER_UNDER", "CORNERS": "CORNERS_OVER_UNDER", "CRN": "CORNERS_OVER_UNDER",
+    "ANGOLI": "CORNERS_OVER_UNDER", "CALCI D'ANGOLO": "CORNERS_OVER_UNDER",
     "CARD": "CARDS_OVER_UNDER", "CARDS": "CARDS_OVER_UNDER", "YC": "CARDS_OVER_UNDER",
     "YELLOW": "CARDS_OVER_UNDER", "YELLOW CARD": "CARDS_OVER_UNDER", "YELLOW CARDS": "CARDS_OVER_UNDER",
+    "CARTELLINI": "CARDS_OVER_UNDER", "AMMONIZIONI": "CARDS_OVER_UNDER",
     "SHOT": "SHOTS_OVER_UNDER", "SHOTS": "SHOTS_OVER_UNDER",
+    "TIRI": "SHOTS_OVER_UNDER",
     "SOT": "SHOTS_ON_TARGET_OVER_UNDER", "SHOTS ON TARGET": "SHOTS_ON_TARGET_OVER_UNDER",
+    "TIRI IN PORTA": "SHOTS_ON_TARGET_OVER_UNDER",
     "FOUL": "FOULS_OVER_UNDER", "FOULS": "FOULS_OVER_UNDER",
+    "FALLI": "FOULS_OVER_UNDER",
     "OFFSIDE": "OFFSIDES_OVER_UNDER", "OFFSIDES": "OFFSIDES_OVER_UNDER",
+    "FUORIGIOCO": "OFFSIDES_OVER_UNDER",
     "TEAM CORNER": "TEAM_CORNERS_OVER_UNDER", "TEAM CORNERS": "TEAM_CORNERS_OVER_UNDER",
     "TEAM CARD": "TEAM_CARDS_OVER_UNDER", "TEAM CARDS": "TEAM_CARDS_OVER_UNDER",
     "TEAM": "TEAM_OVER_UNDER", "TEAM GOAL": "TEAM_OVER_UNDER", "TEAM GOALS": "TEAM_OVER_UNDER",
     "1H": "HT_OVER_UNDER", "HT": "HT_OVER_UNDER", "1ST HALF": "HT_OVER_UNDER",
     "FIRST HALF": "HT_OVER_UNDER",
+    "PT": "HT_OVER_UNDER", "1T": "HT_OVER_UNDER", "PRIMO TEMPO": "HT_OVER_UNDER",
     "2H": "SECOND_HALF_OVER_UNDER", "2ND HALF": "SECOND_HALF_OVER_UNDER",
     "SECOND HALF": "SECOND_HALF_OVER_UNDER",
+    "ST": "SECOND_HALF_OVER_UNDER", "2T": "SECOND_HALF_OVER_UNDER", "SECONDO TEMPO": "SECOND_HALF_OVER_UNDER",
     "BOTH HALVES": "BOTH_HALVES_OVER_UNDER", "BH": "BOTH_HALVES_OVER_UNDER",
+    "ENTRAMBI I TEMPI": "BOTH_HALVES_OVER_UNDER",
 }
 
 
@@ -909,8 +921,8 @@ def parse_raw_bet(raw: str) -> dict:
     m = _MARGIN_RE.match(s)
     if m:
         side = _HA_MAP.get(m.group(1).upper(), m.group(1).upper())
-        margin = m.group(2)
-        plus = m.group(3) or ""
+        margin = m.group(3)
+        plus = m.group(4) or ""
         return {"market": "MARGIN_OF_VICTORY", "pick": f"{side} BY {margin}{plus}"}
 
     # ═══ HT/FT ("1/X", "HOME/AWAY") ═══
@@ -921,11 +933,11 @@ def parse_raw_bet(raw: str) -> dict:
             return {"market": "HT_FT", "pick": s}
 
     # ═══ 1X2 singles ═══
-    if s in ("1", "H", "HOME"):
+    if s in ("1", "H", "HOME", "CASA"):
         return {"market": "MATCH_WINNER", "pick": "HOME"}
-    if s in ("X", "D", "DRAW"):
+    if s in ("X", "D", "DRAW", "PAREGGIO"):
         return {"market": "MATCH_WINNER", "pick": "DRAW"}
-    if s in ("2", "A", "AWAY"):
+    if s in ("2", "A", "AWAY", "OSPITE", "FUORI"):
         return {"market": "MATCH_WINNER", "pick": "AWAY"}
 
     # ═══ Double Chance ═══
@@ -937,9 +949,9 @@ def parse_raw_bet(raw: str) -> dict:
         return {"market": "DOUBLE_CHANCE", "pick": "12"}
 
     # ═══ BTTS ═══
-    if s in ("GG", "YES", "Y", "BTTS", "BTTS YES"):
+    if s in ("GG", "YES", "Y", "BTTS", "BTTS YES", "GOL", "BTTS SI", "SI"):
         return {"market": "BTTS", "pick": "YES"}
-    if s in ("NG", "NO", "N", "BTTS NO"):
+    if s in ("NG", "NO", "N", "BTTS NO", "NOGOL", "NO GOL"):
         return {"market": "BTTS", "pick": "NO"}
 
     # ═══ Odd/Even ═══
@@ -949,77 +961,87 @@ def parse_raw_bet(raw: str) -> dict:
         return {"market": "ODD_EVEN", "pick": "EVEN"}
 
     # ═══ HT Odd/Even ═══
-    if s in ("HT ODD", "1H ODD"):
+    if s in ("HT ODD", "1H ODD", "PT DISPARI", "1T DISPARI"):
         return {"market": "HT_ODD_EVEN", "pick": "ODD"}
-    if s in ("HT EVEN", "1H EVEN"):
+    if s in ("HT EVEN", "1H EVEN", "PT PARI", "1T PARI"):
         return {"market": "HT_ODD_EVEN", "pick": "EVEN"}
-    if s in ("2H ODD",):
+    if s in ("2H ODD", "ST DISPARI", "2T DISPARI"):
         return {"market": "SECOND_HALF_ODD_EVEN", "pick": "ODD"}
-    if s in ("2H EVEN",):
+    if s in ("2H EVEN", "ST PARI", "2T PARI"):
         return {"market": "SECOND_HALF_ODD_EVEN", "pick": "EVEN"}
 
     # ═══ Draw No Bet ═══
-    if s in ("DNB 1", "DNB HOME", "DNB1"):
+    if s in ("DNB 1", "DNB HOME", "DNB1", "DNB CASA"):
         return {"market": "DRAW_NO_BET", "pick": "HOME"}
-    if s in ("DNB 2", "DNB AWAY", "DNB2"):
+    if s in ("DNB 2", "DNB AWAY", "DNB2", "DNB OSPITE", "DNB FUORI"):
         return {"market": "DRAW_NO_BET", "pick": "AWAY"}
 
     # ═══ HT DNB ═══
-    if s in ("HT DNB 1", "HT DNB HOME", "1H DNB 1"):
+    if s in ("HT DNB 1", "HT DNB HOME", "1H DNB 1", "PT DNB 1", "1T DNB 1"):
         return {"market": "HT_DRAW_NO_BET", "pick": "HOME"}
-    if s in ("HT DNB 2", "HT DNB AWAY", "1H DNB 2"):
+    if s in ("HT DNB 2", "HT DNB AWAY", "1H DNB 2", "PT DNB 2", "1T DNB 2"):
         return {"market": "HT_DRAW_NO_BET", "pick": "AWAY"}
 
     # ═══ HT Double Chance ═══
-    if s in ("HT 1X", "1H 1X"):
+    if s in ("HT 1X", "1H 1X", "PT 1X", "1T 1X"):
         return {"market": "HT_DOUBLE_CHANCE", "pick": "1X"}
-    if s in ("HT X2", "1H X2"):
+    if s in ("HT X2", "1H X2", "PT X2", "1T X2"):
         return {"market": "HT_DOUBLE_CHANCE", "pick": "X2"}
-    if s in ("HT 12", "1H 12"):
+    if s in ("HT 12", "1H 12", "PT 12", "1T 12"):
         return {"market": "HT_DOUBLE_CHANCE", "pick": "12"}
 
     # ═══ 2H Double Chance ═══
-    if s in ("2H 1X", ):
+    if s in ("2H 1X", "ST 1X", "2T 1X"):
         return {"market": "SECOND_HALF_DOUBLE_CHANCE", "pick": "1X"}
-    if s in ("2H X2", ):
+    if s in ("2H X2", "ST X2", "2T X2"):
         return {"market": "SECOND_HALF_DOUBLE_CHANCE", "pick": "X2"}
-    if s in ("2H 12", ):
+    if s in ("2H 12", "ST 12", "2T 12"):
         return {"market": "SECOND_HALF_DOUBLE_CHANCE", "pick": "12"}
 
     # ═══ Win to Nil ═══
-    if s in ("HOME WIN NIL", "1 NIL", "HOME NIL", "WIN TO NIL 1", "WTN 1"):
+    if s in ("HOME WIN NIL", "1 NIL", "HOME NIL", "WIN TO NIL 1", "WTN 1",
+             "CASA VINCE SENZA SUBIRE", "VITTORIA SENZA SUBIRE 1"):
         return {"market": "WIN_TO_NIL", "pick": "HOME"}
-    if s in ("AWAY WIN NIL", "2 NIL", "AWAY NIL", "WIN TO NIL 2", "WTN 2"):
+    if s in ("AWAY WIN NIL", "2 NIL", "AWAY NIL", "WIN TO NIL 2", "WTN 2",
+             "OSPITE VINCE SENZA SUBIRE", "VITTORIA SENZA SUBIRE 2"):
         return {"market": "WIN_TO_NIL", "pick": "AWAY"}
 
     # ═══ Clean Sheet ═══
-    if s in ("CS HOME YES", "CLEAN SHEET HOME", "CS 1"):
+    if s in ("CS HOME YES", "CLEAN SHEET HOME", "CS 1",
+             "PORTA INVIOLATA CASA", "CS CASA SI"):
         return {"market": "CLEAN_SHEET", "pick": "YES", "team": "HOME"}
-    if s in ("CS AWAY YES", "CLEAN SHEET AWAY", "CS 2"):
+    if s in ("CS AWAY YES", "CLEAN SHEET AWAY", "CS 2",
+             "PORTA INVIOLATA OSPITE", "CS OSPITE SI"):
         return {"market": "CLEAN_SHEET", "pick": "YES", "team": "AWAY"}
-    if s in ("CS HOME NO",):
+    if s in ("CS HOME NO", "CS CASA NO"):
         return {"market": "CLEAN_SHEET", "pick": "NO", "team": "HOME"}
-    if s in ("CS AWAY NO",):
+    if s in ("CS AWAY NO", "CS OSPITE NO"):
         return {"market": "CLEAN_SHEET", "pick": "NO", "team": "AWAY"}
 
     # ═══ First/Last Team to Score ═══
-    if s in ("FIRST GOAL HOME", "1ST GOAL 1", "FIRST GOAL 1"):
+    if s in ("FIRST GOAL HOME", "1ST GOAL 1", "FIRST GOAL 1",
+             "PRIMO GOL CASA", "PRIMO GOL 1", "1 SEGNA PER PRIMO"):
         return {"market": "FIRST_TEAM_TO_SCORE", "pick": "HOME"}
-    if s in ("FIRST GOAL AWAY", "1ST GOAL 2", "FIRST GOAL 2"):
+    if s in ("FIRST GOAL AWAY", "1ST GOAL 2", "FIRST GOAL 2",
+             "PRIMO GOL OSPITE", "PRIMO GOL 2", "2 SEGNA PER PRIMO"):
         return {"market": "FIRST_TEAM_TO_SCORE", "pick": "AWAY"}
-    if s in ("NO GOAL", "NO GOALS", "0:0"):
+    if s in ("NO GOAL", "NO GOALS", "0:0", "NESSUN GOL"):
         return {"market": "FIRST_TEAM_TO_SCORE", "pick": "NONE"}
-    if s in ("LAST GOAL HOME", "LAST GOAL 1"):
+    if s in ("LAST GOAL HOME", "LAST GOAL 1",
+             "ULTIMO GOL CASA", "ULTIMO GOL 1"):
         return {"market": "LAST_TEAM_TO_SCORE", "pick": "HOME"}
-    if s in ("LAST GOAL AWAY", "LAST GOAL 2"):
+    if s in ("LAST GOAL AWAY", "LAST GOAL 2",
+             "ULTIMO GOL OSPITE", "ULTIMO GOL 2"):
         return {"market": "LAST_TEAM_TO_SCORE", "pick": "AWAY"}
 
     # ═══ Highest Scoring Half ═══
-    if s in ("1ST HALF HIGHEST", "HSH 1ST", "HSH 1", "HIGHEST 1ST"):
+    if s in ("1ST HALF HIGHEST", "HSH 1ST", "HSH 1", "HIGHEST 1ST",
+             "PT PIU GOL", "PRIMO TEMPO PIU GOL"):
         return {"market": "HIGHEST_SCORING_HALF", "pick": "FIRST"}
-    if s in ("2ND HALF HIGHEST", "HSH 2ND", "HSH 2", "HIGHEST 2ND"):
+    if s in ("2ND HALF HIGHEST", "HSH 2ND", "HSH 2", "HIGHEST 2ND",
+             "ST PIU GOL", "SECONDO TEMPO PIU GOL"):
         return {"market": "HIGHEST_SCORING_HALF", "pick": "SECOND"}
-    if s in ("HSH EQUAL", "EQUAL HALVES", "HSH X"):
+    if s in ("HSH EQUAL", "EQUAL HALVES", "HSH X", "TEMPI UGUALI"):
         return {"market": "HIGHEST_SCORING_HALF", "pick": "EQUAL"}
 
     # Could not parse — return raw
