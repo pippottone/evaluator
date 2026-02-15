@@ -413,6 +413,38 @@ def _result_multi_goals(sel: Selection, o: FixtureOutcome) -> SelectionResult:
     return _r(sel, W if won else L, f"Total goals={total}")
 
 
+def _result_team_multi_goals(sel: Selection, o: FixtureOutcome) -> SelectionResult:
+    """Team-specific multi-goals range: does team X score within [lo, hi]?"""
+    assert o.home_goals is not None and o.away_goals is not None
+    team = (sel.team or "").upper()
+    if team == "HOME":
+        goals = o.home_goals
+    elif team == "AWAY":
+        goals = o.away_goals
+    else:
+        return _r(sel, NS, "TEAM_MULTI_GOALS requires team=HOME or AWAY")
+    pick = sel.pick.strip()
+    if pick.endswith("+"):
+        try:
+            low = int(pick[:-1])
+        except ValueError:
+            return _r(sel, NS, f"Cannot parse pick '{pick}'")
+        won = goals >= low
+    elif "-" in pick:
+        parts = pick.split("-")
+        if len(parts) != 2:
+            return _r(sel, NS, f"Cannot parse pick '{pick}'")
+        try:
+            low, high = int(parts[0]), int(parts[1])
+        except ValueError:
+            return _r(sel, NS, f"Cannot parse pick '{pick}'")
+        won = low <= goals <= high
+    else:
+        return _r(sel, NS, f"Cannot parse pick '{pick}'. Use range (e.g. 1-3) or threshold (e.g. 2+)")
+    label = "Home" if team == "HOME" else "Away"
+    return _r(sel, W if won else L, f"{label} goals={goals}")
+
+
 def _result_handicap_result(sel: Selection, o: FixtureOutcome) -> SelectionResult:
     """European (3-way) handicap: line applied to home team, settle HOME/DRAW/AWAY."""
     assert o.home_goals is not None and o.away_goals is not None
@@ -799,6 +831,7 @@ MARKET_EVALUATORS: dict[Market, Callable[[Selection, FixtureOutcome], SelectionR
     Market.EXACT_GOALS: _result_exact_goals,
     Market.TEAM_EXACT_GOALS: _result_team_exact_goals,
     Market.MULTI_GOALS: _result_multi_goals,
+    Market.TEAM_MULTI_GOALS: _result_team_multi_goals,
     Market.HANDICAP_RESULT: _result_handicap_result,
     Market.CLEAN_SHEET: _result_clean_sheet,
     Market.WIN_TO_NIL: _result_win_to_nil,

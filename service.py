@@ -74,6 +74,16 @@ class SelectionIn(BaseModel):
             if self.pick not in {"HOME", "AWAY", "DRAW"}:
                 raise ValueError(f"{m.value} pick must be HOME, AWAY or DRAW")
 
+        # ── team multi-goals range ──
+        if m == Market.TEAM_MULTI_GOALS:
+            import re as _re2
+            if not _re2.match(r'^\d+-\d+$', self.pick):
+                raise ValueError("TEAM_MULTI_GOALS pick must be a range like 1-3")
+            tv = (self.team or "").strip().upper()
+            if tv not in {"HOME", "AWAY"}:
+                raise ValueError("TEAM_MULTI_GOALS requires team=HOME or team=AWAY")
+            self.team = tv
+
         # ── team over/under family ──
         _team_ou = {
             Market.TEAM_OVER_UNDER,
@@ -266,6 +276,10 @@ _MARKET_ALIASES: dict[str, Market] = {
     "MULTI_GOALS": Market.MULTI_GOALS,
     "MULTIGOALS": Market.MULTI_GOALS,
     "TOTAL_GOALS_RANGE": Market.MULTI_GOALS,
+
+    "TEAM_MULTI_GOALS": Market.TEAM_MULTI_GOALS,
+    "TEAM_MULTIGOALS": Market.TEAM_MULTI_GOALS,
+    "MULTIGOL_TEAM": Market.TEAM_MULTI_GOALS,
 
     # ── Odd / Even ──
     "ODD_EVEN": Market.ODD_EVEN,
@@ -592,7 +606,8 @@ def _normalize_pick(market: Market, pick: str) -> str:
         return f"{r_map[parts[0]]}/{o_map[parts[1]]}"
 
     # ── numeric / range (exact goals, multi goals, margin) ──
-    if m in {Market.EXACT_GOALS, Market.TEAM_EXACT_GOALS, Market.MULTI_GOALS, Market.MARGIN_OF_VICTORY}:
+    if m in {Market.EXACT_GOALS, Market.TEAM_EXACT_GOALS, Market.MULTI_GOALS,
+            Market.TEAM_MULTI_GOALS, Market.MARGIN_OF_VICTORY}:
         return key  # pass through; evaluator will parse
 
     # fallback
@@ -685,7 +700,7 @@ _HANDICAP_RE = re.compile(
     re.IGNORECASE,
 )
 _HANDICAP_ALT_RE = re.compile(
-    r"^(HOME|AWAY|CASA|OSPITE|1|2)\s*([+-]\d+(?:\.\d+)?)$",
+    r"^(HOME|AWAY|CASA|OSPITE|1|2)\s+([+-]\d+(?:\.\d+)?)$",
     re.IGNORECASE,
 )
 _EXACT_GOALS_RE = re.compile(r"^(EXACT|EXACTLY|ESATTO|ESATTAMENTE)\s*(\d+)\s*(GOALS?|GOL)?$", re.IGNORECASE)
@@ -864,8 +879,120 @@ def parse_raw_bet(raw: str) -> dict:
       "EXACT 3"        → EXACT_GOALS / 3
       "1-3 GOALS"      → MULTI_GOALS / 1-3
       "HOME BY 2"      → MARGIN_OF_VICTORY / HOME BY 2
+
+      ── Pipe-separated (Italian bookmaker OCR) ──
+      "ESITO FINALE 1X2 | 1"            → MATCH_WINNER / HOME
+      "GG/NG | SI"                       → BTTS / YES
+      "MULTIGOL 1-3 OSPITE | SI"        → TEAM_MULTI_GOALS / 1-3 / AWAY
+      "U/O 2.5 CARTELLINI | OVER"       → CARDS_OVER_UNDER / OVER / 2.5
     """
     s = raw.strip().upper()
+
+    # ═══ Italian bookmaker pipe-separated format: "DESCRIPTION | CHOICE" ═══
+    if "|" in s:
+        _pipe_parts = s.split("|", 1)
+        _desc = _pipe_parts[0].strip()
+        _choice = _pipe_parts[1].strip()
+
+        # ── Combo selections with + (can't evaluate as single market) ──
+        if "+" in _desc and "+" in _choice:
+            return {"market": "UNMAPPED", "pick": s,
+                    "reason": "Combo selections (multiple conditions with +) not supported as single market"}
+
+        # ── ESITO FINALE 1X2 | 1/X/2 ──
+        if re.match(r'^ESITO\s+FINALE(\s+1X2)?$', _desc):
+            _pk = _R_MAP.get(_choice)
+            if _pk:
+                return {"market": "MATCH_WINNER", "pick": _pk}
+
+        # ── DOPPIA CHANCE | 1X / X2 / 12 ──
+        if re.match(r'^(DOPPIA\s+CHANCE|DOUBLE\s+CHANCE)$', _desc):
+            if _choice in ("1X", "X2", "12"):
+                return {"market": "DOUBLE_CHANCE", "pick": _choice}
+
+        # ── GG/NG, GOL/NOGOL | SI/NO ──
+        if _desc in ("GG/NG", "GOL/NOGOL", "GG NG", "GOL NOGOL", "BTTS",
+                      "GOAL/NO GOAL", "ENTRAMBE SEGNANO"):
+            _bv = _B_MAP.get(_choice)
+            if _bv:
+                return {"market": "BTTS", "pick": _bv}
+
+        # ── DNB | HOME/AWAY/1/2 ──
+        if re.match(r'^(DNB|DRAW\s*NO\s*BET)$', _desc):
+            _pk = _HA_MAP.get(_choice, _R_MAP.get(_choice))
+            if _pk in ("HOME", "AWAY"):
+                return {"market": "DRAW_NO_BET", "pick": _pk}
+
+        # ── PARI/DISPARI | PARI / DISPARI ──
+        if _desc in ("PARI/DISPARI", "PARI DISPARI", "ODD/EVEN", "ODD EVEN"):
+            if _choice in ("PARI", "EVEN"):
+                return {"market": "ODD_EVEN", "pick": "EVEN"}
+            if _choice in ("DISPARI", "ODD"):
+                return {"market": "ODD_EVEN", "pick": "ODD"}
+
+        # ── U/O N.N STAT | OVER/UNDER (e.g. "U/O 2.5 CARTELLINI | OVER") ──
+        _uo_m = re.match(r'^U/?O\s+(\d+(?:\.\d+)?)\s+(.+)$', _desc)
+        if _uo_m:
+            _line = float(_uo_m.group(1))
+            _stat = _uo_m.group(2).strip()
+            _stat = _NOISE_RE.sub('', _stat).strip()           # strip INC.TS etc.
+            _pk = "OVER" if _choice.startswith("O") else "UNDER"
+            _stat_map = {
+                "CARTELLINI": "CARDS_OVER_UNDER", "AMMONIZIONI": "CARDS_OVER_UNDER",
+                "CARD": "CARDS_OVER_UNDER", "CARDS": "CARDS_OVER_UNDER",
+                "CORNER": "CORNERS_OVER_UNDER", "CORNERS": "CORNERS_OVER_UNDER",
+                "ANGOLI": "CORNERS_OVER_UNDER",
+                "TIRI": "SHOTS_OVER_UNDER", "SHOTS": "SHOTS_OVER_UNDER",
+                "TIRI IN PORTA": "SHOTS_ON_TARGET_OVER_UNDER",
+                "SOT": "SHOTS_ON_TARGET_OVER_UNDER",
+                "SHOTS ON TARGET": "SHOTS_ON_TARGET_OVER_UNDER",
+                "FALLI": "FOULS_OVER_UNDER", "FOULS": "FOULS_OVER_UNDER",
+                "FUORIGIOCO": "OFFSIDES_OVER_UNDER", "OFFSIDES": "OFFSIDES_OVER_UNDER",
+                "GOL": "OVER_UNDER", "GOAL": "OVER_UNDER", "GOALS": "OVER_UNDER",
+            }
+            _mkt = _stat_map.get(_stat, "OVER_UNDER")
+            return {"market": _mkt, "pick": _pk, "line": _line}
+
+        # ── MULTIGOL X-Y [CASA/OSPITE] | SI ──
+        _mg_m = re.match(
+            r'^MULTIGOL\s+(\d+)\s*-\s*(\d+)(?:\s+(CASA|OSPITE|HOME|AWAY|1|2))?$',
+            _desc,
+        )
+        if _mg_m:
+            _lo, _hi = _mg_m.group(1), _mg_m.group(2)
+            _team_raw = _mg_m.group(3)
+            if _team_raw:
+                _team = _HA_MAP.get(_team_raw, _team_raw)
+                return {"market": "TEAM_MULTI_GOALS", "pick": f"{_lo}-{_hi}", "team": _team}
+            else:
+                return {"market": "MULTI_GOALS", "pick": f"{_lo}-{_hi}"}
+
+        # ── 1° TEMPO / PRIMO TEMPO / HT | 1/X/2/GG/NG ──
+        if re.match(
+            r'^(?:1\s*TEMPO|PRIMO\s+TEMPO|1T|PT|1H|HT|FIRST\s+HALF|1ST\s+HALF)'
+            r'(?:\s+1X2)?$', _desc,
+        ):
+            _pk = _R_MAP.get(_choice)
+            if _pk:
+                return {"market": "HT_MATCH_WINNER", "pick": _pk}
+            _bv = _B_MAP.get(_choice)
+            if _bv:
+                return {"market": "HT_BTTS", "pick": _bv}
+
+        # ── 2° TEMPO / SECONDO TEMPO / 2H | 1/X/2/GG/NG ──
+        if re.match(
+            r'^(?:2\s*TEMPO|SECONDO\s+TEMPO|2T|ST|2H|SECOND\s+HALF|2ND\s+HALF)'
+            r'(?:\s+1X2)?$', _desc,
+        ):
+            _pk = _R_MAP.get(_choice)
+            if _pk:
+                return {"market": "SECOND_HALF_MATCH_WINNER", "pick": _pk}
+            _bv = _B_MAP.get(_choice)
+            if _bv:
+                return {"market": "SECOND_HALF_BTTS", "pick": _bv}
+
+        # ── Pipe-format not recognized: return UNMAPPED ──
+        return {"market": "UNMAPPED", "pick": s}
 
     # ═══ Strip bookmaker noise (INC.TS, INCL.TS, REG. ONLY, etc.) ═══
     s = _NOISE_RE.sub(' ', s).strip()

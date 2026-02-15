@@ -29,6 +29,7 @@ class Market(str, Enum):
     EXACT_GOALS = "EXACT_GOALS"
     TEAM_EXACT_GOALS = "TEAM_EXACT_GOALS"
     MULTI_GOALS = "MULTI_GOALS"
+    TEAM_MULTI_GOALS = "TEAM_MULTI_GOALS"
     ODD_EVEN = "ODD_EVEN"
     # ── correct score ──
     CORRECT_SCORE = "CORRECT_SCORE"
