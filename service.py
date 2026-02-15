@@ -899,8 +899,11 @@ def parse_raw_bet(raw: str) -> dict:
             return {"market": "UNMAPPED", "pick": s,
                     "reason": "Combo selections (multiple conditions with +) not supported as single market"}
 
-        # ── ESITO FINALE 1X2 | 1/X/2 ──
-        if re.match(r'^ESITO\s+FINALE(\s+1X2)?$', _desc):
+        # ── ESITO FINALE 1X2 / 1X2 | 1/X/2/1X/X2/12 ──
+        if re.match(r'^(ESITO\s+FINALE(\s+1X2)?|1X2)$', _desc):
+            # Double chance picks (1X, X2, 12) take priority
+            if _choice in ("1X", "X2", "12"):
+                return {"market": "DOUBLE_CHANCE", "pick": _choice}
             _pk = _R_MAP.get(_choice)
             if _pk:
                 return {"market": "MATCH_WINNER", "pick": _pk}
@@ -1437,15 +1440,18 @@ def validate_betslip_smart(payload: SmartValidationRequest) -> dict:
         fixture_id = fx["fixture_id"]
         swapped = fx.get("_swapped", False)
 
-        # Parse bet string → market + pick + line
+        # Parse bet string → market + pick + line + team
         parsed = parse_raw_bet(row.bet)
         market = _normalize_market(parsed["market"])
         pick = parsed["pick"]
         line = parsed.get("line")
+        team = parsed.get("team")  # e.g. HOME/AWAY for team markets
 
-        # If teams were swapped AND bet is directional, flip pick
+        # If teams were swapped AND bet is directional, flip pick and team
         if swapped and pick in ("HOME", "AWAY"):
             pick = "AWAY" if pick == "HOME" else "HOME"
+        if swapped and team in ("HOME", "AWAY"):
+            team = "AWAY" if team == "HOME" else "HOME"
 
         # Build selection
         sel = Selection(
@@ -1453,7 +1459,7 @@ def validate_betslip_smart(payload: SmartValidationRequest) -> dict:
             market=market,
             pick=pick,
             line=line,
-            team=None,
+            team=team,
         )
         selections.append(sel)
 
@@ -1466,6 +1472,7 @@ def validate_betslip_smart(payload: SmartValidationRequest) -> dict:
             "resolved_market": market.value,
             "resolved_pick": pick,
             "resolved_line": line,
+            "resolved_team": team,
             "odds": row.odds,
         })
 
