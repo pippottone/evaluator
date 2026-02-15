@@ -710,6 +710,41 @@ _RESULT_OU_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Stat-category + team pattern: "FUORIGIOCO 2", "ANGOLI 1", "CARTELLINI CASA"
+_STAT_TEAM_RE = re.compile(
+    r"^(CORNER|CORNERS|CRN|ANGOLI|CALCI D'ANGOLO|"
+    r"CARD|CARDS|YC|YELLOW|YELLOW CARDS?|CARTELLINI|AMMONIZIONI|"
+    r"SHOT|SHOTS|SOT|SHOTS ON TARGET|TIRI|TIRI IN PORTA|"
+    r"FOUL|FOULS|FALLI|"
+    r"OFFSIDE|OFFSIDES|FUORIGIOCO)"
+    r"\s+(1|2|HOME|AWAY|CASA|OSPITE)$",
+    re.IGNORECASE,
+)
+_PREFIX_TO_TEAM_MARKET = {
+    "CORNER": "TEAM_CORNERS_OVER_UNDER", "CORNERS": "TEAM_CORNERS_OVER_UNDER",
+    "CRN": "TEAM_CORNERS_OVER_UNDER", "ANGOLI": "TEAM_CORNERS_OVER_UNDER",
+    "CALCI D'ANGOLO": "TEAM_CORNERS_OVER_UNDER",
+    "CARD": "TEAM_CARDS_OVER_UNDER", "CARDS": "TEAM_CARDS_OVER_UNDER",
+    "YC": "TEAM_CARDS_OVER_UNDER", "YELLOW": "TEAM_CARDS_OVER_UNDER",
+    "YELLOW CARD": "TEAM_CARDS_OVER_UNDER", "YELLOW CARDS": "TEAM_CARDS_OVER_UNDER",
+    "CARTELLINI": "TEAM_CARDS_OVER_UNDER", "AMMONIZIONI": "TEAM_CARDS_OVER_UNDER",
+    # For shots/fouls/offsides there's no team variant in Market enum,
+    # so we keep the total market but tag with team
+    "SHOT": "SHOTS_OVER_UNDER", "SHOTS": "SHOTS_OVER_UNDER", "TIRI": "SHOTS_OVER_UNDER",
+    "SOT": "SHOTS_ON_TARGET_OVER_UNDER", "SHOTS ON TARGET": "SHOTS_ON_TARGET_OVER_UNDER",
+    "TIRI IN PORTA": "SHOTS_ON_TARGET_OVER_UNDER",
+    "FOUL": "FOULS_OVER_UNDER", "FOULS": "FOULS_OVER_UNDER", "FALLI": "FOULS_OVER_UNDER",
+    "OFFSIDE": "OFFSIDES_OVER_UNDER", "OFFSIDES": "OFFSIDES_OVER_UNDER",
+    "FUORIGIOCO": "OFFSIDES_OVER_UNDER",
+}
+
+# Noise patterns Italian bookmakers append (e.g. "INC.TS", "INCL.TS")
+_NOISE_RE = re.compile(
+    r"\s*\b(INC\.?\s*T\.?S\.?|INCL\.?\s*T\.?S\.?|INCL\.?\s*SUPPL\.?|"
+    r"REG\.?\s*ONLY|90\s*MIN\.?|TEMPO\s*REG\.?)\s*",
+    re.IGNORECASE,
+)
+
 # Lookup helpers
 _R_MAP = {"1": "HOME", "H": "HOME", "HOME": "HOME", "CASA": "HOME",
            "X": "DRAW", "D": "DRAW", "DRAW": "DRAW", "PAREGGIO": "DRAW",
@@ -816,6 +851,11 @@ def parse_raw_bet(raw: str) -> dict:
     """
     s = raw.strip().upper()
 
+    # ═══ Strip bookmaker noise (INC.TS, INCL.TS, REG. ONLY, etc.) ═══
+    s = _NOISE_RE.sub(' ', s).strip()
+    # Collapse multiple spaces
+    s = re.sub(r'\s{2,}', ' ', s)
+
     # ═══ Prefixed Over/Under (corners, cards, shots, halves, etc.) ═══
     m = _PREFIXED_OU_RE.match(s)
     if m:
@@ -829,6 +869,17 @@ def parse_raw_bet(raw: str) -> dict:
         if market in ("TEAM_OVER_UNDER", "TEAM_CORNERS_OVER_UNDER", "TEAM_CARDS_OVER_UNDER"):
             result["team"] = "HOME"  # default, user can override
         return result
+
+    # ═══ Stat + Team ("FUORIGIOCO 2", "ANGOLI CASA", "CARTELLINI 1") ═══
+    m = _STAT_TEAM_RE.match(s)
+    if m:
+        prefix = m.group(1).upper()
+        team_raw = m.group(2).upper()
+        team = _HA_MAP.get(team_raw, team_raw)
+        market = _PREFIX_TO_TEAM_MARKET.get(prefix)
+        if market:
+            # Return as team-specific stat (no line — the evaluator uses total stats)
+            return {"market": market, "pick": "OVER", "line": 0.5, "team": team}
 
     # ═══ Result + O/U combo ("1/OVER 2.5", "HOME+OVER 2.5") ═══
     m = _RESULT_OU_RE.match(s)
