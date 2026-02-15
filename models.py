@@ -17,6 +17,7 @@ class SelectionStatus(str, Enum):
 
 
 class Market(str, Enum):
+    UNMAPPED = "UNMAPPED"
     MATCH_WINNER = "MATCH_WINNER"
     DOUBLE_CHANCE = "DOUBLE_CHANCE"
     OVER_UNDER = "OVER_UNDER"
@@ -33,6 +34,9 @@ class Market(str, Enum):
     TEAM_CORNERS_OVER_UNDER = "TEAM_CORNERS_OVER_UNDER"
     CARDS_OVER_UNDER = "CARDS_OVER_UNDER"
     TEAM_CARDS_OVER_UNDER = "TEAM_CARDS_OVER_UNDER"
+    ASIAN_HANDICAP = "ASIAN_HANDICAP"
+    ODD_EVEN = "ODD_EVEN"
+    WIN_TO_NIL = "WIN_TO_NIL"
 
 
 @dataclass
@@ -42,6 +46,7 @@ class Selection:
     pick: str
     line: Optional[float] = None
     team: Optional[str] = None
+    raw_market: Optional[str] = None
 
 
 @dataclass

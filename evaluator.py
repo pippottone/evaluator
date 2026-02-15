@@ -488,6 +488,98 @@ def _result_ht_ft(selection: Selection, outcome: FixtureOutcome) -> SelectionRes
     )
 
 
+def _result_asian_handicap(selection: Selection, outcome: FixtureOutcome) -> SelectionResult:
+    assert outcome.home_goals is not None and outcome.away_goals is not None
+    if selection.line is None:
+        return SelectionResult(
+            fixture_id=selection.fixture_id,
+            market=selection.market.value,
+            pick=selection.pick,
+            status=SelectionStatus.NOT_SUPPORTED,
+            reason="ASIAN_HANDICAP requires line",
+        )
+
+    pick = selection.pick.upper()
+    if pick not in {"HOME", "AWAY"}:
+        return SelectionResult(
+            fixture_id=selection.fixture_id,
+            market=selection.market.value,
+            pick=selection.pick,
+            status=SelectionStatus.NOT_SUPPORTED,
+            reason="ASIAN_HANDICAP pick must be HOME or AWAY",
+        )
+
+    home_adjusted = outcome.home_goals + selection.line
+    away_adjusted = outcome.away_goals
+    if pick == "AWAY":
+        home_adjusted = outcome.home_goals
+        away_adjusted = outcome.away_goals + selection.line
+
+    if home_adjusted == away_adjusted:
+        return SelectionResult(
+            fixture_id=selection.fixture_id,
+            market=selection.market.value,
+            pick=selection.pick,
+            status=SelectionStatus.PUSH,
+            reason=f"Adjusted score tied ({home_adjusted}-{away_adjusted})",
+        )
+
+    won = home_adjusted > away_adjusted if pick == "HOME" else away_adjusted > home_adjusted
+    return SelectionResult(
+        fixture_id=selection.fixture_id,
+        market=selection.market.value,
+        pick=selection.pick,
+        status=SelectionStatus.WON if won else SelectionStatus.LOST,
+        reason=f"Adjusted score home={home_adjusted}, away={away_adjusted}",
+    )
+
+
+def _result_odd_even(selection: Selection, outcome: FixtureOutcome) -> SelectionResult:
+    assert outcome.home_goals is not None and outcome.away_goals is not None
+    total = outcome.home_goals + outcome.away_goals
+    actual = "EVEN" if total % 2 == 0 else "ODD"
+    pick = selection.pick.upper()
+    if pick not in {"ODD", "EVEN"}:
+        return SelectionResult(
+            fixture_id=selection.fixture_id,
+            market=selection.market.value,
+            pick=selection.pick,
+            status=SelectionStatus.NOT_SUPPORTED,
+            reason="ODD_EVEN pick must be ODD or EVEN",
+        )
+    return SelectionResult(
+        fixture_id=selection.fixture_id,
+        market=selection.market.value,
+        pick=selection.pick,
+        status=SelectionStatus.WON if pick == actual else SelectionStatus.LOST,
+        reason=f"Total goals={total} ({actual})",
+    )
+
+
+def _result_win_to_nil(selection: Selection, outcome: FixtureOutcome) -> SelectionResult:
+    assert outcome.home_goals is not None and outcome.away_goals is not None
+    pick = selection.pick.upper()
+    if pick not in {"HOME", "AWAY"}:
+        return SelectionResult(
+            fixture_id=selection.fixture_id,
+            market=selection.market.value,
+            pick=selection.pick,
+            status=SelectionStatus.NOT_SUPPORTED,
+            reason="WIN_TO_NIL pick must be HOME or AWAY",
+        )
+
+    home_win_to_nil = outcome.home_goals > outcome.away_goals and outcome.away_goals == 0
+    away_win_to_nil = outcome.away_goals > outcome.home_goals and outcome.home_goals == 0
+    won = home_win_to_nil if pick == "HOME" else away_win_to_nil
+    return SelectionResult(
+        fixture_id=selection.fixture_id,
+        market=selection.market.value,
+        pick=selection.pick,
+        status=SelectionStatus.WON if won else SelectionStatus.LOST,
+        reason=f"Final score={outcome.home_goals}:{outcome.away_goals}",
+    )
+
+
 def _settle_over_under_value(
     selection: Selection,
     value: Optional[int],
@@ -657,6 +749,9 @@ MARKET_EVALUATORS: dict[Market, Callable[[Selection, FixtureOutcome], SelectionR
     Market.HT_OVER_UNDER: _result_ht_over_under,
     Market.SECOND_HALF_OVER_UNDER: _result_second_half_over_under,
     Market.HT_FT: _result_ht_ft,
+    Market.ASIAN_HANDICAP: _result_asian_handicap,
+    Market.ODD_EVEN: _result_odd_even,
+    Market.WIN_TO_NIL: _result_win_to_nil,
 }
 
 
@@ -669,6 +764,16 @@ STATS_MARKETS = {
 
 
 def evaluate_selection(selection: Selection, outcome: FixtureOutcome) -> SelectionResult:
+    if selection.market == Market.UNMAPPED:
+        market_name = selection.raw_market or selection.market.value
+        return SelectionResult(
+            fixture_id=selection.fixture_id,
+            market=market_name,
+            pick=selection.pick,
+            status=SelectionStatus.NOT_SUPPORTED,
+            reason=f"Market '{market_name}' is recognized as input but not yet implemented for settlement",
+        )
+
     if outcome.home_goals is None or outcome.away_goals is None:
         return SelectionResult(
             fixture_id=selection.fixture_id,
@@ -692,6 +797,15 @@ def evaluate_selection(selection: Selection, outcome: FixtureOutcome) -> Selecti
 
 
 def evaluate_stats_selection(selection: Selection, stats: Optional[FixtureStatistics]) -> SelectionResult:
+    if selection.market == Market.UNMAPPED:
+        market_name = selection.raw_market or selection.market.value
+        return SelectionResult(
+            fixture_id=selection.fixture_id,
+            market=market_name,
+            pick=selection.pick,
+            status=SelectionStatus.NOT_SUPPORTED,
+            reason=f"Statistics market '{market_name}' is not yet implemented",
+        )
     if selection.market == Market.CORNERS_OVER_UNDER:
         return _result_corners_over_under(selection, stats)
     if selection.market == Market.TEAM_CORNERS_OVER_UNDER:
@@ -738,6 +852,19 @@ def evaluate_betslip(client: APISportsClient, selections: Iterable[Selection]) -
     results: List[SelectionResult] = []
 
     for selection in selections:
+        if selection.market == Market.UNMAPPED:
+            market_name = selection.raw_market or selection.market.value
+            results.append(
+                SelectionResult(
+                    fixture_id=selection.fixture_id,
+                    market=market_name,
+                    pick=selection.pick,
+                    status=SelectionStatus.NOT_SUPPORTED,
+                    reason=f"Market '{market_name}' is not yet implemented",
+                )
+            )
+            continue
+
         try:
             outcome = client.get_fixture_outcome(selection.fixture_id)
         except Exception as exc:

@@ -31,6 +31,9 @@ It is designed for the workflow you described:
 - `TEAM_CORNERS_OVER_UNDER` (home/away corners over/under line)
 - `CARDS_OVER_UNDER` (total cards = yellow+red over/under line)
 - `TEAM_CARDS_OVER_UNDER` (home/away cards = yellow+red over/under line)
+- `ASIAN_HANDICAP` (`HOME`/`AWAY` + line)
+- `ODD_EVEN` (`ODD`/`EVEN` on total goals)
+- `WIN_TO_NIL` (`HOME`/`AWAY`)
 
 ## Setup
 
@@ -128,8 +131,18 @@ Additional aliases:
 - market: `TEAM_CORNERS_OU` -> `TEAM_CORNERS_OVER_UNDER`
 - market: `CARDS_OU` -> `CARDS_OVER_UNDER`
 - market: `TEAM_CARDS_OU` -> `TEAM_CARDS_OVER_UNDER`
+- market: `HANDICAP` -> `ASIAN_HANDICAP`
+- market: `ODD_EVEN` -> `ODD_EVEN`
+- market: `HOME_WIN_TO_NIL`, `AWAY_WIN_TO_NIL` -> `WIN_TO_NIL`
 
 If `base_url` is omitted in this endpoint, set `API_BASE_URL` in environment.
+
+Unknown markets are accepted in table mode and returned as `not_supported` (not HTTP error), so your pipeline can ingest all rows and settle what is implemented.
+
+## Market registry endpoints
+
+- `GET /markets/supported` -> currently implemented canonical markets in this service
+- `GET /markets/discovered?base_url=https://v3.football.api-sports.io` -> pulls API-Football `odds/bets` catalog and shows implemented vs not implemented
 
 ## Run with Docker (separate tool deployment)
 

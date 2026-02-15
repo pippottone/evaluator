@@ -71,6 +71,30 @@ class ServiceMappingTests(unittest.TestCase):
         self.assertEqual(selection.market, Market.TEAM_CARDS_OVER_UNDER)
         self.assertEqual(selection.team, "AWAY")
 
+    def test_unknown_market_maps_to_unmapped(self) -> None:
+        row = TableRowIn(fixture_id=21, market="TOTALLY_UNKNOWN_MARKET", pick="ANY")
+        selection = _row_to_selection(row)
+        self.assertEqual(selection.market, Market.UNMAPPED)
+        self.assertEqual(selection.raw_market, "TOTALLY_UNKNOWN_MARKET")
+
+    def test_asian_handicap_alias(self) -> None:
+        row = TableRowIn(fixture_id=22, market="HANDICAP", pick="1", line=0.5)
+        selection = _row_to_selection(row)
+        self.assertEqual(selection.market, Market.ASIAN_HANDICAP)
+        self.assertEqual(selection.pick, "HOME")
+
+    def test_odd_even_alias(self) -> None:
+        row = TableRowIn(fixture_id=23, market="ODD_EVEN", pick="ODD")
+        selection = _row_to_selection(row)
+        self.assertEqual(selection.market, Market.ODD_EVEN)
+        self.assertEqual(selection.pick, "ODD")
+
+    def test_win_to_nil_alias(self) -> None:
+        row = TableRowIn(fixture_id=24, market="HOME_WIN_TO_NIL", pick="1")
+        selection = _row_to_selection(row)
+        self.assertEqual(selection.market, Market.WIN_TO_NIL)
+        self.assertEqual(selection.pick, "HOME")
+
 
 if __name__ == "__main__":
     unittest.main()

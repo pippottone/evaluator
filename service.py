@@ -11,6 +11,29 @@ from evaluator import evaluate_betslip
 from models import Market, Selection
 
 
+IMPLEMENTED_MARKETS = {
+    Market.MATCH_WINNER,
+    Market.DOUBLE_CHANCE,
+    Market.OVER_UNDER,
+    Market.BTTS,
+    Market.DRAW_NO_BET,
+    Market.TEAM_OVER_UNDER,
+    Market.CORRECT_SCORE,
+    Market.HT_MATCH_WINNER,
+    Market.SECOND_HALF_MATCH_WINNER,
+    Market.HT_OVER_UNDER,
+    Market.SECOND_HALF_OVER_UNDER,
+    Market.HT_FT,
+    Market.CORNERS_OVER_UNDER,
+    Market.TEAM_CORNERS_OVER_UNDER,
+    Market.CARDS_OVER_UNDER,
+    Market.TEAM_CARDS_OVER_UNDER,
+    Market.ASIAN_HANDICAP,
+    Market.ODD_EVEN,
+    Market.WIN_TO_NIL,
+}
+
+
 class SelectionIn(BaseModel):
     fixture_id: int = Field(gt=0)
     market: Market
@@ -79,6 +102,15 @@ class SelectionIn(BaseModel):
             if team_value not in {"HOME", "AWAY"}:
                 raise ValueError(f"{self.market.value} requires team=HOME or team=AWAY")
             self.team = team_value
+        if self.market == Market.ASIAN_HANDICAP:
+            if self.pick not in {"HOME", "AWAY"}:
+                raise ValueError("ASIAN_HANDICAP pick must be HOME or AWAY")
+            if self.line is None:
+                raise ValueError("ASIAN_HANDICAP requires line")
+        if self.market == Market.ODD_EVEN and self.pick not in {"ODD", "EVEN"}:
+            raise ValueError("ODD_EVEN pick must be ODD or EVEN")
+        if self.market == Market.WIN_TO_NIL and self.pick not in {"HOME", "AWAY"}:
+            raise ValueError("WIN_TO_NIL pick must be HOME or AWAY")
         return self
 
 
@@ -103,23 +135,42 @@ class TableValidationRequest(BaseModel):
 
 
 def _normalize_market(value: str) -> Market:
-    key = value.strip().upper().replace("-", "_").replace(" ", "_")
+    key = value.strip().upper()
+    for token in ["-", " ", "/", "(", ")", ".", "?", "'", ","]:
+        key = key.replace(token, "_")
+    while "__" in key:
+        key = key.replace("__", "_")
+    key = key.strip("_")
     aliases = {
         "MATCH_WINNER": Market.MATCH_WINNER,
         "1X2": Market.MATCH_WINNER,
         "MONEYLINE": Market.MATCH_WINNER,
+        "FIRST_HALF_WINNER": Market.HT_MATCH_WINNER,
+        "SECOND_HALF_WINNER": Market.SECOND_HALF_MATCH_WINNER,
         "DOUBLE_CHANCE": Market.DOUBLE_CHANCE,
+        "DOUBLE_CHANCE_FIRST_HALF": Market.DOUBLE_CHANCE,
+        "DOUBLE_CHANCE_SECOND_HALF": Market.DOUBLE_CHANCE,
         "DC": Market.DOUBLE_CHANCE,
         "OVER_UNDER": Market.OVER_UNDER,
+        "GOALS_OVER_UNDER": Market.OVER_UNDER,
         "OU": Market.OVER_UNDER,
+        "GOALS_OVER_UNDER_FIRST_HALF": Market.HT_OVER_UNDER,
+        "GOALS_OVER_UNDER_SECOND_HALF": Market.SECOND_HALF_OVER_UNDER,
         "BTTS": Market.BTTS,
+        "BOTH_TEAMS_SCORE": Market.BTTS,
+        "BOTH_TEAMS_TO_SCORE": Market.BTTS,
         "BOTH_TEAMS_TO_SCORE": Market.BTTS,
         "GGNG": Market.BTTS,
         "DRAW_NO_BET": Market.DRAW_NO_BET,
+        "DRAW_NO_BET_1ST_HALF": Market.DRAW_NO_BET,
+        "DRAW_NO_BET_2ND_HALF": Market.DRAW_NO_BET,
         "DNB": Market.DRAW_NO_BET,
         "TEAM_OVER_UNDER": Market.TEAM_OVER_UNDER,
         "TEAM_TOTAL_GOALS": Market.TEAM_OVER_UNDER,
+        "TOTAL_HOME": Market.TEAM_OVER_UNDER,
+        "TOTAL_AWAY": Market.TEAM_OVER_UNDER,
         "CORRECT_SCORE": Market.CORRECT_SCORE,
+        "EXACT_SCORE": Market.CORRECT_SCORE,
         "CS": Market.CORRECT_SCORE,
         "HT_MATCH_WINNER": Market.HT_MATCH_WINNER,
         "HT_1X2": Market.HT_MATCH_WINNER,
@@ -132,17 +183,41 @@ def _normalize_market(value: str) -> Market:
         "2H_OU": Market.SECOND_HALF_OVER_UNDER,
         "HT_FT": Market.HT_FT,
         "HTFT": Market.HT_FT,
+        "HT_FT_DOUBLE": Market.HT_FT,
         "CORNERS_OVER_UNDER": Market.CORNERS_OVER_UNDER,
+        "CORNERS_OVER_UNDER": Market.CORNERS_OVER_UNDER,
+        "CORNERS_OVER_UNDER_FIRST_HALF": Market.CORNERS_OVER_UNDER,
+        "TOTAL_CORNERS": Market.CORNERS_OVER_UNDER,
         "CORNERS_OU": Market.CORNERS_OVER_UNDER,
         "TEAM_CORNERS_OVER_UNDER": Market.TEAM_CORNERS_OVER_UNDER,
+        "HOME_CORNERS_OVER_UNDER": Market.TEAM_CORNERS_OVER_UNDER,
+        "AWAY_CORNERS_OVER_UNDER": Market.TEAM_CORNERS_OVER_UNDER,
+        "HOME_TOTAL_CORNERS": Market.TEAM_CORNERS_OVER_UNDER,
+        "AWAY_TOTAL_CORNERS": Market.TEAM_CORNERS_OVER_UNDER,
         "TEAM_CORNERS_OU": Market.TEAM_CORNERS_OVER_UNDER,
         "CARDS_OVER_UNDER": Market.CARDS_OVER_UNDER,
+        "YELLOW_OVER_UNDER": Market.CARDS_OVER_UNDER,
+        "RED_CARDS_OVER_UNDER": Market.CARDS_OVER_UNDER,
         "CARDS_OU": Market.CARDS_OVER_UNDER,
         "TEAM_CARDS_OVER_UNDER": Market.TEAM_CARDS_OVER_UNDER,
+        "HOME_TEAM_TOTAL_CARDS": Market.TEAM_CARDS_OVER_UNDER,
+        "AWAY_TEAM_TOTAL_CARDS": Market.TEAM_CARDS_OVER_UNDER,
+        "HOME_TEAM_YELLOW_CARDS": Market.TEAM_CARDS_OVER_UNDER,
+        "AWAY_TEAM_YELLOW_CARDS": Market.TEAM_CARDS_OVER_UNDER,
         "TEAM_CARDS_OU": Market.TEAM_CARDS_OVER_UNDER,
+        "ASIAN_HANDICAP": Market.ASIAN_HANDICAP,
+        "HANDICAP": Market.ASIAN_HANDICAP,
+        "ODD_EVEN": Market.ODD_EVEN,
+        "ODD_EVEN_FIRST_HALF": Market.ODD_EVEN,
+        "ODD_EVEN_SECOND_HALF": Market.ODD_EVEN,
+        "WIN_TO_NIL": Market.WIN_TO_NIL,
+        "WIN_TO_NIL_HOME": Market.WIN_TO_NIL,
+        "WIN_TO_NIL_AWAY": Market.WIN_TO_NIL,
+        "HOME_WIN_TO_NIL": Market.WIN_TO_NIL,
+        "AWAY_WIN_TO_NIL": Market.WIN_TO_NIL,
     }
     if key not in aliases:
-        raise ValueError(f"Unsupported market '{value}'")
+        return Market.UNMAPPED
     return aliases[key]
 
 
@@ -232,6 +307,25 @@ def _normalize_pick(market: Market, pick: str) -> str:
         if len(tokens) == 2 and all(token in valid_tokens for token in tokens):
             return normalized
         raise ValueError(f"Unsupported pick '{pick}' for market {market.value}")
+    elif market == Market.ASIAN_HANDICAP:
+        mapping = {
+            "1": "HOME",
+            "HOME": "HOME",
+            "2": "AWAY",
+            "AWAY": "AWAY",
+        }
+    elif market == Market.ODD_EVEN:
+        mapping = {
+            "ODD": "ODD",
+            "EVEN": "EVEN",
+        }
+    elif market == Market.WIN_TO_NIL:
+        mapping = {
+            "HOME": "HOME",
+            "AWAY": "AWAY",
+            "1": "HOME",
+            "2": "AWAY",
+        }
     else:
         mapping = {
             "YES": "YES",
@@ -249,6 +343,16 @@ def _normalize_pick(market: Market, pick: str) -> str:
 
 def _row_to_selection(row: TableRowIn) -> Selection:
     market = _normalize_market(row.market)
+    if market == Market.UNMAPPED:
+        return Selection(
+            fixture_id=row.fixture_id,
+            market=Market.UNMAPPED,
+            pick=row.pick.strip().upper(),
+            line=row.line,
+            team=(row.team or "").strip().upper() or None,
+            raw_market=row.market,
+        )
+
     normalized_pick = _normalize_pick(market, row.pick)
     if market == Market.OVER_UNDER and row.line is None:
         raise ValueError(f"Row for fixture {row.fixture_id} requires line for OVER_UNDER")
@@ -261,6 +365,8 @@ def _row_to_selection(row: TableRowIn) -> Selection:
         Market.TEAM_CARDS_OVER_UNDER,
     } and row.line is None:
         raise ValueError(f"Row for fixture {row.fixture_id} requires line for {market.value}")
+    if market == Market.ASIAN_HANDICAP and row.line is None:
+        raise ValueError(f"Row for fixture {row.fixture_id} requires line for ASIAN_HANDICAP")
     normalized_team: Optional[str] = None
     if market == Market.TEAM_OVER_UNDER:
         normalized_team = (row.team or "").strip().upper()
@@ -297,6 +403,48 @@ app = FastAPI(title="Betslip Validator API", version="1.0.0")
 @app.get("/health")
 def health() -> dict:
     return {"status": "ok"}
+
+
+@app.get("/markets/supported")
+def supported_markets() -> dict:
+    return {
+        "implemented": sorted([market.value for market in IMPLEMENTED_MARKETS]),
+        "count": len(IMPLEMENTED_MARKETS),
+    }
+
+
+@app.get("/markets/discovered")
+def discovered_markets(base_url: str, api_key: Optional[str] = None) -> dict:
+    try:
+        client = APISportsClient(base_url=base_url, api_key=api_key)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    try:
+        catalog = client.get_odds_bets_catalog()
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Could not fetch odds bet catalog: {exc}") from exc
+
+    discovered = []
+    for item in catalog:
+        market_name = str(item.get("name") or "")
+        normalized_market = _normalize_market(market_name)
+        discovered.append(
+            {
+                "id": item.get("id"),
+                "name": market_name,
+                "values": item.get("values"),
+                "implemented": normalized_market in IMPLEMENTED_MARKETS,
+            }
+        )
+
+    implemented_count = sum(1 for item in discovered if item["implemented"])
+    return {
+        "total_discovered": len(discovered),
+        "implemented_count": implemented_count,
+        "not_implemented_count": len(discovered) - implemented_count,
+        "markets": discovered,
+    }
 
 
 @app.post("/validate-betslip")

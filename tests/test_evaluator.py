@@ -191,6 +191,54 @@ class EvaluatorTests(unittest.TestCase):
         result = evaluate_betslip(client, selections)
         self.assertEqual(result["results"][0]["status"], "won")
 
+    def test_unmapped_market_not_supported(self) -> None:
+        client = StubClient(
+            {
+                1: FixtureOutcome(fixture_id=1, status_short="FT", home_goals=1, away_goals=1),
+            }
+        )
+        selections = [
+            Selection(
+                fixture_id=1,
+                market=Market.UNMAPPED,
+                pick="SOMETHING",
+                raw_market="EXOTIC_SUPER_MARKET",
+            )
+        ]
+        result = evaluate_betslip(client, selections)
+        self.assertEqual(result["status"], "pending")
+        self.assertEqual(result["results"][0]["status"], "not_supported")
+
+    def test_asian_handicap_won(self) -> None:
+        client = StubClient(
+            {
+                1: FixtureOutcome(fixture_id=1, status_short="FT", home_goals=1, away_goals=1),
+            }
+        )
+        selections = [Selection(fixture_id=1, market=Market.ASIAN_HANDICAP, pick="HOME", line=0.5)]
+        result = evaluate_betslip(client, selections)
+        self.assertEqual(result["results"][0]["status"], "won")
+
+    def test_odd_even(self) -> None:
+        client = StubClient(
+            {
+                1: FixtureOutcome(fixture_id=1, status_short="FT", home_goals=2, away_goals=1),
+            }
+        )
+        selections = [Selection(fixture_id=1, market=Market.ODD_EVEN, pick="ODD")]
+        result = evaluate_betslip(client, selections)
+        self.assertEqual(result["results"][0]["status"], "won")
+
+    def test_win_to_nil(self) -> None:
+        client = StubClient(
+            {
+                1: FixtureOutcome(fixture_id=1, status_short="FT", home_goals=2, away_goals=0),
+            }
+        )
+        selections = [Selection(fixture_id=1, market=Market.WIN_TO_NIL, pick="HOME")]
+        result = evaluate_betslip(client, selections)
+        self.assertEqual(result["results"][0]["status"], "won")
+
 
 if __name__ == "__main__":
     unittest.main()

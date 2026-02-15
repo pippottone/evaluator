@@ -107,6 +107,23 @@ class APISportsClient:
             red_away=away_stats.get("RED CARDS"),
         )
 
+    def get_odds_bets_catalog(self) -> list[dict[str, Any]]:
+        payload = self._get("odds/bets", {})
+        rows = payload.get("response", [])
+        catalog: list[dict[str, Any]] = []
+        for row in rows:
+            item_id = row.get("id")
+            item_name = row.get("name")
+            values = row.get("values") or []
+            catalog.append(
+                {
+                    "id": item_id,
+                    "name": item_name,
+                    "values": values,
+                }
+            )
+        return catalog
+
     @staticmethod
     def is_final_status(status_short: str) -> bool:
         return status_short in FINAL_STATUSES
