@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Betslip Validator</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --card: #1a1d27;
+    --border: #2a2d3a;
+    --accent: #6c5ce7;
+    --accent-hover: #7f70f0;
+    --green: #00b894;
+    --red: #e74c3c;
+    --orange: #f39c12;
+    --gray: #636e72;
+    --text: #dfe6e9;
+    --text-dim: #a0a4b8;
+    --input-bg: #12141c;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    padding: 16px;
+  }
+
+  .container { max-width: 900px; margin: 0 auto; }
+
+  header { text-align: center; padding: 24px 0 16px; }
+  header h1 {
+    font-size: 26px; font-weight: 700;
+    background: linear-gradient(135deg, var(--accent), #a29bfe);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  }
+  header p { color: var(--text-dim); margin-top: 4px; font-size: 13px; }
+
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 16px;
+  }
+  .card-title {
+    font-size: 15px; font-weight: 600; margin-bottom: 14px;
+    display: flex; align-items: center; gap: 8px;
+  }
+
+  /* ── slip table ────────────────────────────────────── */
+  .slip-table { width: 100%; border-collapse: collapse; }
+  .slip-table th {
+    text-align: left; font-size: 11px; text-transform: uppercase;
+    letter-spacing: 0.5px; color: var(--text-dim); padding: 6px 4px 10px;
+    border-bottom: 1px solid var(--border);
+  }
+  .slip-table td { padding: 6px 4px; vertical-align: middle; }
+  .slip-table tbody tr { border-bottom: 1px solid rgba(255,255,255,0.03); }
+
+  input, select {
+    background: var(--input-bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    padding: 9px 10px;
+    font-size: 13px;
+    width: 100%;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+  input:focus { border-color: var(--accent); }
+  input::placeholder { color: var(--gray); }
+  input[type="date"] { color-scheme: dark; }
+
+  .col-date  { width: 140px; }
+  .col-event { }
+  .col-bet   { width: 120px; }
+  .col-odds  { width: 80px; }
+  .col-del   { width: 36px; }
+
+  .btn {
+    border: none; border-radius: 8px; cursor: pointer;
+    font-size: 14px; font-weight: 600; transition: all 0.2s;
+  }
+  .btn-remove {
+    background: transparent; color: var(--red); font-size: 18px;
+    width: 32px; height: 32px;
+    display: flex; align-items: center; justify-content: center;
+    border-radius: 6px;
+  }
+  .btn-remove:hover { background: rgba(231,76,60,0.15); }
+
+  .btn-add {
+    background: transparent; color: var(--accent);
+    border: 1px dashed var(--border);
+    padding: 10px; width: 100%; border-radius: 8px; margin-top: 8px;
+  }
+  .btn-add:hover { border-color: var(--accent); background: rgba(108,92,231,0.05); }
+
+  .btn-validate {
+    background: var(--accent); color: #fff;
+    padding: 14px 40px; font-size: 16px;
+    border-radius: 10px; width: 100%; margin-top: 8px;
+  }
+  .btn-validate:hover { background: var(--accent-hover); }
+  .btn-validate:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  /* ── results ───────────────────────────────────────── */
+  .results-card { display: none; }
+  .results-card.visible { display: block; }
+
+  .slip-status {
+    text-align: center; padding: 16px; border-radius: 8px;
+    font-size: 20px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 1px; margin-bottom: 16px;
+  }
+  .slip-status.won     { background: rgba(0,184,148,0.15); color: var(--green); }
+  .slip-status.lost    { background: rgba(231,76,60,0.15); color: var(--red); }
+  .slip-status.pending { background: rgba(243,156,18,0.15); color: var(--orange); }
+  .slip-status.push, .slip-status.void, .slip-status.refund
+    { background: rgba(99,110,114,0.15); color: var(--gray); }
+
+  .results-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .results-table th {
+    text-align: left; font-size: 11px; text-transform: uppercase;
+    letter-spacing: 0.5px; color: var(--text-dim); padding: 8px 6px;
+    border-bottom: 1px solid var(--border);
+  }
+  .results-table td { padding: 10px 6px; border-bottom: 1px solid rgba(255,255,255,0.03); }
+
+  .badge {
+    display: inline-block; padding: 3px 10px; border-radius: 20px;
+    font-size: 11px; font-weight: 700; text-transform: uppercase;
+  }
+  .badge-won     { background: rgba(0,184,148,0.2); color: var(--green); }
+  .badge-lost    { background: rgba(231,76,60,0.2); color: var(--red); }
+  .badge-pending { background: rgba(243,156,18,0.2); color: var(--orange); }
+  .badge-push, .badge-void, .badge-refund,
+  .badge-not_supported, .badge-cancelled { background: rgba(99,110,114,0.2); color: var(--gray); }
+
+  .reason-text { color: var(--text-dim); font-size: 11px; display: block; margin-top: 2px; }
+
+  .error-msg {
+    background: rgba(231,76,60,0.1); border: 1px solid var(--red);
+    border-radius: 8px; padding: 14px; color: var(--red);
+    display: none; margin-bottom: 12px; white-space: pre-wrap;
+  }
+  .error-msg.visible { display: block; }
+
+  .spinner {
+    display: inline-block; width: 18px; height: 18px;
+    border: 2px solid rgba(255,255,255,0.2);
+    border-top-color: #fff; border-radius: 50%;
+    animation: spin 0.6s linear infinite;
+    vertical-align: middle; margin-right: 8px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .hint {
+    font-size: 11px; color: var(--text-dim); margin-top: 6px;
+    line-height: 1.5;
+  }
+  .hint code {
+    background: rgba(108,92,231,0.15); padding: 1px 5px;
+    border-radius: 3px; font-size: 11px; color: var(--accent);
+  }
+
+  @media (max-width: 640px) {
+    .slip-table th, .col-odds { display: none; }
+    .slip-table td { display: block; width: 100%; padding: 3px 0; }
+    .slip-table tbody tr {
+      display: block; padding: 10px 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .results-table th:nth-child(4), .results-table td:nth-child(4) { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<div class="container">
+  <header>
+    <h1>⚽ Betslip Validator</h1>
+    <p>Paste your bets exactly as they appear — we find the matches and settle them</p>
+  </header>
+
+  <div class="card">
+    <div class="card-title"><span>🎫</span> Your Bets</div>
+
+    <table class="slip-table">
+      <thead>
+        <tr>
+          <th class="col-date">Date</th>
+          <th class="col-event">Event</th>
+          <th class="col-bet">Bet Placed</th>
+          <th class="col-odds">Odds</th>
+          <th class="col-del"></th>
+        </tr>
+      </thead>
+      <tbody id="betRows"></tbody>
+    </table>
+
+    <button class="btn btn-add" onclick="addRow()">+ Add bet</button>
+
+    <div class="hint">
+      <strong>49 markets supported — examples by category:</strong><br>
+      <em>Result:</em>
+      <code>1</code> <code>X</code> <code>2</code>
+      <code>1X</code> <code>X2</code> <code>12</code>
+      <code>DNB 1</code> <code>DNB 2</code><br>
+      <em>Goals O/U:</em>
+      <code>OVER 2.5</code> <code>UNDER 1.5</code> <code>O2.5</code><br>
+      <em>BTTS:</em>
+      <code>GG</code> <code>NG</code>
+      &nbsp; <em>Odd/Even:</em>
+      <code>ODD</code> <code>EVEN</code><br>
+      <em>Correct Score:</em>
+      <code>2:1</code> <code>0:0</code><br>
+      <em>Corners:</em>
+      <code>CORNER OVER 9.5</code> <code>CORNERS UNDER 8.5</code> <code>CRN O 7.5</code><br>
+      <em>Cards:</em>
+      <code>CARD OVER 3.5</code> <code>YELLOW UNDER 2.5</code><br>
+      <em>Shots:</em>
+      <code>SHOTS OVER 10.5</code> <code>SOT OVER 4.5</code><br>
+      <em>Fouls:</em>
+      <code>FOULS OVER 20.5</code>
+      &nbsp; <em>Offsides:</em>
+      <code>OFFSIDES OVER 3.5</code><br>
+      <em>Half-time:</em>
+      <code>HT 1</code> <code>HT X</code> <code>HT OVER 0.5</code>
+      <code>HT GG</code> <code>HT 1:0</code><br>
+      <em>2nd Half:</em>
+      <code>2H 2</code> <code>2H OVER 1.5</code> <code>2H NG</code><br>
+      <em>HT/FT:</em>
+      <code>1/X</code> <code>2/2</code> <code>X/1</code><br>
+      <em>Handicap:</em>
+      <code>AH HOME -1.5</code> <code>HOME -1.5</code> <code>HC 1 -1</code><br>
+      <em>Combos:</em>
+      <code>1&GG</code> <code>X/NG</code>
+      <code>1/OVER 2.5</code><br>
+      <em>Special:</em>
+      <code>EXACT 3</code>
+      <code>1-3</code> (multi goals)
+      <code>HOME BY 2</code>
+      <code>WTN 1</code>
+      <code>CS HOME YES</code>
+      <code>FIRST GOAL HOME</code>
+    </div>
+  </div>
+
+  <button class="btn btn-validate" id="validateBtn" onclick="validate()">
+    ✓ Validate Betslip
+  </button>
+
+  <div class="error-msg" id="errorMsg"></div>
+
+  <div class="card results-card" id="resultsCard">
+    <div class="card-title"><span>📊</span> Results</div>
+    <div id="slipStatus" class="slip-status"></div>
+    <table class="results-table">
+      <thead>
+        <tr>
+          <th>Match</th>
+          <th>Bet</th>
+          <th>Market</th>
+          <th>Odds</th>
+          <th>Result</th>
+        </tr>
+      </thead>
+      <tbody id="resultsList"></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+const API = window.location.origin;
+let rowId = 0;
+
+// Start with 5 rows (like the screenshot)
+for (let i = 0; i < 5; i++) addRow();
+
+function addRow(data) {
+  rowId++;
+  const id = rowId;
+  const tr = document.createElement('tr');
+  tr.id = `row-${id}`;
+  tr.innerHTML = `
+    <td class="col-date">
+      <input type="date" class="r-date" value="${data?.date || ''}">
+    </td>
+    <td class="col-event">
+      <input type="text" class="r-event" placeholder="Napoli - Como" value="${data?.event || ''}">
+    </td>
+    <td class="col-bet">
+      <input type="text" class="r-bet" placeholder="1, X, OVER 2.5…" value="${data?.bet || ''}">
+    </td>
+    <td class="col-odds">
+      <input type="number" step="0.01" class="r-odds" placeholder="—" value="${data?.odds || ''}">
+    </td>
+    <td class="col-del">
+      <button class="btn btn-remove" onclick="removeRow(${id})">×</button>
+    </td>
+  `;
+  document.getElementById('betRows').appendChild(tr);
+}
+
+function removeRow(id) {
+  const row = document.getElementById(`row-${id}`);
+  if (row) row.remove();
+  if (document.querySelectorAll('#betRows tr').length === 0) addRow();
+}
+
+async function validate() {
+  const btn = document.getElementById('validateBtn');
+  const errorEl = document.getElementById('errorMsg');
+  const resultsCard = document.getElementById('resultsCard');
+
+  errorEl.classList.remove('visible');
+  resultsCard.classList.remove('visible');
+
+  // Collect rows
+  const trEls = document.querySelectorAll('#betRows tr');
+  const rows = [];
+  for (const tr of trEls) {
+    const dateVal = tr.querySelector('.r-date').value;
+    const event = tr.querySelector('.r-event').value.trim();
+    const bet = tr.querySelector('.r-bet').value.trim();
+    const oddsVal = tr.querySelector('.r-odds').value;
+
+    if (!event || !bet) continue; // skip empty rows
+
+    if (!dateVal) {
+      errorEl.textContent = `Fill in the date for "${event}".`;
+      errorEl.classList.add('visible');
+      return;
+    }
+
+    // Convert date input (YYYY-MM-DD from browser) to DD-MM-YYYY for our API
+    const [y, m, d] = dateVal.split('-');
+    const row = {
+      date: `${d}-${m}-${y}`,
+      event,
+      bet,
+    };
+    if (oddsVal) row.odds = parseFloat(oddsVal);
+    rows.push(row);
+  }
+
+  if (rows.length === 0) {
+    errorEl.textContent = 'Add at least one bet with Event and Bet filled in.';
+    errorEl.classList.add('visible');
+    return;
+  }
+
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Searching matches & settling bets…';
+
+  try {
+    const resp = await fetch(`${API}/validate-betslip/smart`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rows }),
+    });
+
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({ detail: resp.statusText }));
+      throw new Error(err.detail || 'Validation failed');
+    }
+
+    const data = await resp.json();
+    renderResults(data);
+  } catch (e) {
+    errorEl.textContent = e.message;
+    errorEl.classList.add('visible');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '✓ Validate Betslip';
+  }
+}
+
+function renderResults(data) {
+  const statusEl = document.getElementById('slipStatus');
+  const listEl = document.getElementById('resultsList');
+  const card = document.getElementById('resultsCard');
+
+  statusEl.className = `slip-status ${data.status}`;
+  statusEl.textContent = data.status === 'won' ? '✅ SLIP WON'
+    : data.status === 'lost' ? '❌ SLIP LOST'
+    : data.status === 'pending' ? '⏳ PENDING'
+    : data.status.toUpperCase();
+
+  listEl.innerHTML = '';
+  for (const r of data.results) {
+    const tr = document.createElement('tr');
+    const matchLabel = r.resolved_match || r.event || `#${r.fixture_id}`;
+    const marketLabel = (r.market || '').replace(/_/g, ' ');
+    const odds = r.odds ? r.odds.toFixed(2) : '—';
+    tr.innerHTML = `
+      <td><strong>${matchLabel}</strong>
+        ${r.date ? `<span class="reason-text">${r.date}</span>` : ''}</td>
+      <td><strong>${r.input_bet || r.pick}</strong></td>
+      <td>${marketLabel}<span class="reason-text">${r.reason || ''}</span></td>
+      <td>${odds}</td>
+      <td><span class="badge badge-${r.status}">${r.status}</span></td>
+    `;
+    listEl.appendChild(tr);
+  }
+
+  card.classList.add('visible');
+  card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+</script>
+
+</body>
+</html>

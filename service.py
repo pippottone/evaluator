@@ -1,9 +1,14 @@
 from __future__ import annotations
 
 import os
+import re
 from typing import List, Optional
 
+from pathlib import Path
+
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from api_client import APISportsClient
@@ -637,6 +642,446 @@ def _row_to_selection(row: TableRowIn) -> Selection:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+#  Smart bet parsing — auto-detect market + pick + line from a raw bet string
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Pre-compiled patterns for bet string parsing
+_OVER_UNDER_RE = re.compile(r"^(OVER|UNDER|O|U)\s*(\d+(?:\.\d+)?)$", re.IGNORECASE)
+_SCORE_RE = re.compile(r"^(\d+)\s*[-:]\s*(\d+)$")
+_PREFIXED_OU_RE = re.compile(
+    r"^(CORNER|CORNERS|CRN|"
+    r"CARD|CARDS|YC|YELLOW|YELLOW CARDS?|"
+    r"SHOT|SHOTS|SOT|SHOTS ON TARGET|"
+    r"FOUL|FOULS|"
+    r"OFFSIDE|OFFSIDES|"
+    r"TEAM CORNER|TEAM CORNERS|"
+    r"TEAM CARD|TEAM CARDS|"
+    r"TEAM GOAL|TEAM GOALS|TEAM|"
+    r"1H|HT|1ST HALF|FIRST HALF|"
+    r"2H|2ND HALF|SECOND HALF|"
+    r"BOTH HALVES|BH)"
+    r"\s+(OVER|UNDER|O|U)\s*(\d+(?:\.\d+)?)$",
+    re.IGNORECASE,
+)
+_HANDICAP_RE = re.compile(
+    r"^(AH|HANDICAP|HC|H)\s*(HOME|AWAY|1|2)\s*([+-]?\d+(?:\.\d+)?)$",
+    re.IGNORECASE,
+)
+_HANDICAP_ALT_RE = re.compile(
+    r"^(HOME|AWAY|1|2)\s*([+-]\d+(?:\.\d+)?)$",
+    re.IGNORECASE,
+)
+_EXACT_GOALS_RE = re.compile(r"^(EXACT|EXACTLY)\s*(\d+)\s*(GOALS?)?$", re.IGNORECASE)
+_MULTI_GOALS_RE = re.compile(r"^(\d+)\s*-\s*(\d+)\s*(GOALS?)?$")
+_MARGIN_RE = re.compile(
+    r"^(HOME|AWAY|1|2)\s+BY\s+(\d+)(\+)?$",
+    re.IGNORECASE,
+)
+_HT_1X2_RE = re.compile(
+    r"^(1H|HT|1ST HALF|FIRST HALF)\s+(1|X|2|HOME|DRAW|AWAY)$",
+    re.IGNORECASE,
+)
+_2H_1X2_RE = re.compile(
+    r"^(2H|2ND HALF|SECOND HALF)\s+(1|X|2|HOME|DRAW|AWAY)$",
+    re.IGNORECASE,
+)
+_HT_SCORE_RE = re.compile(
+    r"^(HT|1H|1ST HALF)\s+(\d+)\s*[-:]\s*(\d+)$",
+    re.IGNORECASE,
+)
+_2H_SCORE_RE = re.compile(
+    r"^(2H|2ND HALF)\s+(\d+)\s*[-:]\s*(\d+)$",
+    re.IGNORECASE,
+)
+_HT_GG_RE = re.compile(
+    r"^(HT|1H|1ST HALF)\s+(GG|NG|YES|NO|BTTS)$",
+    re.IGNORECASE,
+)
+_2H_GG_RE = re.compile(
+    r"^(2H|2ND HALF)\s+(GG|NG|YES|NO|BTTS)$",
+    re.IGNORECASE,
+)
+_RESULT_BTTS_RE = re.compile(
+    r"^(1|X|2|HOME|DRAW|AWAY)\s*[/&+]\s*(GG|NG|YES|NO|BTTS)$",
+    re.IGNORECASE,
+)
+_RESULT_OU_RE = re.compile(
+    r"^(1|X|2|HOME|DRAW|AWAY)\s*[/&+]\s*(OVER|UNDER|O|U)\s*(\d+(?:\.\d+)?)$",
+    re.IGNORECASE,
+)
+
+# Lookup helpers
+_R_MAP = {"1": "HOME", "H": "HOME", "HOME": "HOME",
+           "X": "DRAW", "D": "DRAW", "DRAW": "DRAW",
+           "2": "AWAY", "A": "AWAY", "AWAY": "AWAY"}
+_B_MAP = {"GG": "YES", "YES": "YES", "Y": "YES", "BTTS": "YES",
+           "NG": "NO", "NO": "NO", "N": "NO"}
+_HA_MAP = {"1": "HOME", "HOME": "HOME", "2": "AWAY", "AWAY": "AWAY"}
+_PREFIX_TO_MARKET = {
+    "CORNER": "CORNERS_OVER_UNDER", "CORNERS": "CORNERS_OVER_UNDER", "CRN": "CORNERS_OVER_UNDER",
+    "CARD": "CARDS_OVER_UNDER", "CARDS": "CARDS_OVER_UNDER", "YC": "CARDS_OVER_UNDER",
+    "YELLOW": "CARDS_OVER_UNDER", "YELLOW CARD": "CARDS_OVER_UNDER", "YELLOW CARDS": "CARDS_OVER_UNDER",
+    "SHOT": "SHOTS_OVER_UNDER", "SHOTS": "SHOTS_OVER_UNDER",
+    "SOT": "SHOTS_ON_TARGET_OVER_UNDER", "SHOTS ON TARGET": "SHOTS_ON_TARGET_OVER_UNDER",
+    "FOUL": "FOULS_OVER_UNDER", "FOULS": "FOULS_OVER_UNDER",
+    "OFFSIDE": "OFFSIDES_OVER_UNDER", "OFFSIDES": "OFFSIDES_OVER_UNDER",
+    "TEAM CORNER": "TEAM_CORNERS_OVER_UNDER", "TEAM CORNERS": "TEAM_CORNERS_OVER_UNDER",
+    "TEAM CARD": "TEAM_CARDS_OVER_UNDER", "TEAM CARDS": "TEAM_CARDS_OVER_UNDER",
+    "TEAM": "TEAM_OVER_UNDER", "TEAM GOAL": "TEAM_OVER_UNDER", "TEAM GOALS": "TEAM_OVER_UNDER",
+    "1H": "HT_OVER_UNDER", "HT": "HT_OVER_UNDER", "1ST HALF": "HT_OVER_UNDER",
+    "FIRST HALF": "HT_OVER_UNDER",
+    "2H": "SECOND_HALF_OVER_UNDER", "2ND HALF": "SECOND_HALF_OVER_UNDER",
+    "SECOND HALF": "SECOND_HALF_OVER_UNDER",
+    "BOTH HALVES": "BOTH_HALVES_OVER_UNDER", "BH": "BOTH_HALVES_OVER_UNDER",
+}
+
+
+def parse_raw_bet(raw: str) -> dict:
+    """
+    Parse a raw bet string from a bookmaker slip into {market, pick, line?, team?}.
+
+    Supports all 49 markets. Examples:
+
+      ── 1X2 / Result ──
+      "1"              → MATCH_WINNER / HOME
+      "X"              → MATCH_WINNER / DRAW
+      "2"              → MATCH_WINNER / AWAY
+      "1X"             → DOUBLE_CHANCE / 1X
+      "X2"             → DOUBLE_CHANCE / X2
+      "12"             → DOUBLE_CHANCE / 12
+      "DNB 1"          → DRAW_NO_BET / HOME
+
+      ── Over/Under (goals) ──
+      "OVER 2.5"       → OVER_UNDER / OVER / 2.5
+      "UNDER 1.5"      → OVER_UNDER / UNDER / 1.5
+      "O2.5"           → OVER_UNDER / OVER / 2.5
+
+      ── Stats Over/Under ──
+      "CORNER OVER 9.5" → CORNERS_OVER_UNDER / OVER / 9.5
+      "CARD UNDER 3.5"  → CARDS_OVER_UNDER / UNDER / 3.5
+      "SHOTS OVER 10.5" → SHOTS_OVER_UNDER / OVER / 10.5
+      "SOT OVER 4.5"    → SHOTS_ON_TARGET_OVER_UNDER / OVER / 4.5
+      "FOULS OVER 20.5" → FOULS_OVER_UNDER / OVER / 20.5
+      "OFFSIDES OVER 3" → OFFSIDES_OVER_UNDER / OVER / 3.0
+
+      ── Half-time / Second-half ──
+      "HT OVER 1.5"    → HT_OVER_UNDER / OVER / 1.5
+      "2H OVER 1.5"    → SECOND_HALF_OVER_UNDER / OVER / 1.5
+      "HT 1"           → HT_MATCH_WINNER / HOME
+      "2H X"           → SECOND_HALF_MATCH_WINNER / DRAW
+      "HT 2:1"         → HT_CORRECT_SCORE / 2:1
+      "HT GG"          → HT_BTTS / YES
+      "2H NG"          → SECOND_HALF_BTTS / NO
+
+      ── BTTS / GG-NG ──
+      "GG"             → BTTS / YES
+      "NG"             → BTTS / NO
+
+      ── Correct Score ──
+      "2:1"            → CORRECT_SCORE / 2:1
+
+      ── Odd/Even ──
+      "ODD"            → ODD_EVEN / ODD
+      "EVEN"           → ODD_EVEN / EVEN
+
+      ── Handicap ──
+      "AH HOME -1.5"   → ASIAN_HANDICAP / HOME / -1.5
+      "HOME -1.5"      → ASIAN_HANDICAP / HOME / -1.5
+      "HC 1 -1"        → ASIAN_HANDICAP / HOME / -1.0
+
+      ── HT/FT ──
+      "1/X"            → HT_FT / 1/X
+
+      ── Combos ──
+      "1&GG"           → RESULT_BTTS / HOME/YES
+      "X/NG"           → RESULT_BTTS / DRAW/NO
+      "1/OVER 2.5"     → RESULT_OVER_UNDER / HOME/OVER / 2.5
+
+      ── Special ──
+      "EXACT 3"        → EXACT_GOALS / 3
+      "1-3 GOALS"      → MULTI_GOALS / 1-3
+      "HOME BY 2"      → MARGIN_OF_VICTORY / HOME BY 2
+    """
+    s = raw.strip().upper()
+
+    # ═══ Prefixed Over/Under (corners, cards, shots, halves, etc.) ═══
+    m = _PREFIXED_OU_RE.match(s)
+    if m:
+        prefix = m.group(1).upper()
+        pick = "OVER" if m.group(2).upper().startswith("O") else "UNDER"
+        line = float(m.group(3))
+        market = _PREFIX_TO_MARKET.get(prefix, "OVER_UNDER")
+        result = {"market": market, "pick": pick, "line": line}
+        # Team markets need team= but we can't know from bet string alone,
+        # the endpoint will require it separately or infer HOME
+        if market in ("TEAM_OVER_UNDER", "TEAM_CORNERS_OVER_UNDER", "TEAM_CARDS_OVER_UNDER"):
+            result["team"] = "HOME"  # default, user can override
+        return result
+
+    # ═══ Result + O/U combo ("1/OVER 2.5", "HOME+OVER 2.5") ═══
+    m = _RESULT_OU_RE.match(s)
+    if m:
+        r = _R_MAP.get(m.group(1).upper())
+        ou = "OVER" if m.group(2).upper().startswith("O") else "UNDER"
+        line = float(m.group(3))
+        if r:
+            return {"market": "RESULT_OVER_UNDER", "pick": f"{r}/{ou}", "line": line}
+
+    # ═══ Result + BTTS combo ("1&GG", "HOME/YES") ═══
+    m = _RESULT_BTTS_RE.match(s)
+    if m:
+        r = _R_MAP.get(m.group(1).upper())
+        b = _B_MAP.get(m.group(2).upper())
+        if r and b:
+            return {"market": "RESULT_BTTS", "pick": f"{r}/{b}"}
+
+    # ═══ Handicap ("AH HOME -1.5", "HC 1 -1") ═══
+    m = _HANDICAP_RE.match(s)
+    if m:
+        side = _HA_MAP.get(m.group(2).upper(), m.group(2).upper())
+        line = float(m.group(3))
+        return {"market": "ASIAN_HANDICAP", "pick": side, "line": line}
+
+    # ═══ Handicap alt ("HOME -1.5", "1 -0.5") ═══
+    m = _HANDICAP_ALT_RE.match(s)
+    if m:
+        side = _HA_MAP.get(m.group(1).upper(), m.group(1).upper())
+        line = float(m.group(2))
+        if side in ("HOME", "AWAY"):
+            return {"market": "ASIAN_HANDICAP", "pick": side, "line": line}
+
+    # ═══ HT 1X2 ("HT 1", "1ST HALF X") ═══
+    m = _HT_1X2_RE.match(s)
+    if m:
+        pick = _R_MAP.get(m.group(2).upper(), m.group(2).upper())
+        return {"market": "HT_MATCH_WINNER", "pick": pick}
+
+    # ═══ 2H 1X2 ("2H 2", "2ND HALF X") ═══
+    m = _2H_1X2_RE.match(s)
+    if m:
+        pick = _R_MAP.get(m.group(2).upper(), m.group(2).upper())
+        return {"market": "SECOND_HALF_MATCH_WINNER", "pick": pick}
+
+    # ═══ HT Correct Score ("HT 1:0") ═══
+    m = _HT_SCORE_RE.match(s)
+    if m:
+        return {"market": "HT_CORRECT_SCORE", "pick": f"{m.group(2)}:{m.group(3)}"}
+
+    # ═══ 2H Correct Score ("2H 2:1") ═══
+    m = _2H_SCORE_RE.match(s)
+    if m:
+        return {"market": "SECOND_HALF_CORRECT_SCORE", "pick": f"{m.group(2)}:{m.group(3)}"}
+
+    # ═══ HT BTTS ("HT GG") ═══
+    m = _HT_GG_RE.match(s)
+    if m:
+        b = _B_MAP.get(m.group(2).upper(), "YES")
+        return {"market": "HT_BTTS", "pick": b}
+
+    # ═══ 2H BTTS ("2H NG") ═══
+    m = _2H_GG_RE.match(s)
+    if m:
+        b = _B_MAP.get(m.group(2).upper(), "YES")
+        return {"market": "SECOND_HALF_BTTS", "pick": b}
+
+    # ═══ Goals Over/Under (plain) ═══
+    m = _OVER_UNDER_RE.match(s)
+    if m:
+        pick = "OVER" if m.group(1)[0] == "O" else "UNDER"
+        return {"market": "OVER_UNDER", "pick": pick, "line": float(m.group(2))}
+
+    # ═══ Correct Score ═══
+    m = _SCORE_RE.match(s)
+    if m:
+        return {"market": "CORRECT_SCORE", "pick": f"{m.group(1)}:{m.group(2)}"}
+
+    # ═══ Exact Goals ("EXACT 3", "EXACTLY 2 GOALS") ═══
+    m = _EXACT_GOALS_RE.match(s)
+    if m:
+        return {"market": "EXACT_GOALS", "pick": m.group(2)}
+
+    # ═══ Multi Goals range ("1-3", "2-4 GOALS") ═══
+    m = _MULTI_GOALS_RE.match(s)
+    if m:
+        return {"market": "MULTI_GOALS", "pick": f"{m.group(1)}-{m.group(2)}"}
+
+    # ═══ Margin of Victory ("HOME BY 2", "1 BY 3+") ═══
+    m = _MARGIN_RE.match(s)
+    if m:
+        side = _HA_MAP.get(m.group(1).upper(), m.group(1).upper())
+        margin = m.group(2)
+        plus = m.group(3) or ""
+        return {"market": "MARGIN_OF_VICTORY", "pick": f"{side} BY {margin}{plus}"}
+
+    # ═══ HT/FT ("1/X", "HOME/AWAY") ═══
+    if "/" in s and len(s) <= 11:
+        parts = s.split("/")
+        valid = {"1", "X", "2", "HOME", "DRAW", "AWAY"}
+        if len(parts) == 2 and all(p.strip() in valid for p in parts):
+            return {"market": "HT_FT", "pick": s}
+
+    # ═══ 1X2 singles ═══
+    if s in ("1", "H", "HOME"):
+        return {"market": "MATCH_WINNER", "pick": "HOME"}
+    if s in ("X", "D", "DRAW"):
+        return {"market": "MATCH_WINNER", "pick": "DRAW"}
+    if s in ("2", "A", "AWAY"):
+        return {"market": "MATCH_WINNER", "pick": "AWAY"}
+
+    # ═══ Double Chance ═══
+    if s == "1X":
+        return {"market": "DOUBLE_CHANCE", "pick": "1X"}
+    if s == "X2":
+        return {"market": "DOUBLE_CHANCE", "pick": "X2"}
+    if s == "12":
+        return {"market": "DOUBLE_CHANCE", "pick": "12"}
+
+    # ═══ BTTS ═══
+    if s in ("GG", "YES", "Y", "BTTS", "BTTS YES"):
+        return {"market": "BTTS", "pick": "YES"}
+    if s in ("NG", "NO", "N", "BTTS NO"):
+        return {"market": "BTTS", "pick": "NO"}
+
+    # ═══ Odd/Even ═══
+    if s in ("ODD", "DISPARI"):
+        return {"market": "ODD_EVEN", "pick": "ODD"}
+    if s in ("EVEN", "PARI"):
+        return {"market": "ODD_EVEN", "pick": "EVEN"}
+
+    # ═══ HT Odd/Even ═══
+    if s in ("HT ODD", "1H ODD"):
+        return {"market": "HT_ODD_EVEN", "pick": "ODD"}
+    if s in ("HT EVEN", "1H EVEN"):
+        return {"market": "HT_ODD_EVEN", "pick": "EVEN"}
+    if s in ("2H ODD",):
+        return {"market": "SECOND_HALF_ODD_EVEN", "pick": "ODD"}
+    if s in ("2H EVEN",):
+        return {"market": "SECOND_HALF_ODD_EVEN", "pick": "EVEN"}
+
+    # ═══ Draw No Bet ═══
+    if s in ("DNB 1", "DNB HOME", "DNB1"):
+        return {"market": "DRAW_NO_BET", "pick": "HOME"}
+    if s in ("DNB 2", "DNB AWAY", "DNB2"):
+        return {"market": "DRAW_NO_BET", "pick": "AWAY"}
+
+    # ═══ HT DNB ═══
+    if s in ("HT DNB 1", "HT DNB HOME", "1H DNB 1"):
+        return {"market": "HT_DRAW_NO_BET", "pick": "HOME"}
+    if s in ("HT DNB 2", "HT DNB AWAY", "1H DNB 2"):
+        return {"market": "HT_DRAW_NO_BET", "pick": "AWAY"}
+
+    # ═══ HT Double Chance ═══
+    if s in ("HT 1X", "1H 1X"):
+        return {"market": "HT_DOUBLE_CHANCE", "pick": "1X"}
+    if s in ("HT X2", "1H X2"):
+        return {"market": "HT_DOUBLE_CHANCE", "pick": "X2"}
+    if s in ("HT 12", "1H 12"):
+        return {"market": "HT_DOUBLE_CHANCE", "pick": "12"}
+
+    # ═══ 2H Double Chance ═══
+    if s in ("2H 1X", ):
+        return {"market": "SECOND_HALF_DOUBLE_CHANCE", "pick": "1X"}
+    if s in ("2H X2", ):
+        return {"market": "SECOND_HALF_DOUBLE_CHANCE", "pick": "X2"}
+    if s in ("2H 12", ):
+        return {"market": "SECOND_HALF_DOUBLE_CHANCE", "pick": "12"}
+
+    # ═══ Win to Nil ═══
+    if s in ("HOME WIN NIL", "1 NIL", "HOME NIL", "WIN TO NIL 1", "WTN 1"):
+        return {"market": "WIN_TO_NIL", "pick": "HOME"}
+    if s in ("AWAY WIN NIL", "2 NIL", "AWAY NIL", "WIN TO NIL 2", "WTN 2"):
+        return {"market": "WIN_TO_NIL", "pick": "AWAY"}
+
+    # ═══ Clean Sheet ═══
+    if s in ("CS HOME YES", "CLEAN SHEET HOME", "CS 1"):
+        return {"market": "CLEAN_SHEET", "pick": "YES", "team": "HOME"}
+    if s in ("CS AWAY YES", "CLEAN SHEET AWAY", "CS 2"):
+        return {"market": "CLEAN_SHEET", "pick": "YES", "team": "AWAY"}
+    if s in ("CS HOME NO",):
+        return {"market": "CLEAN_SHEET", "pick": "NO", "team": "HOME"}
+    if s in ("CS AWAY NO",):
+        return {"market": "CLEAN_SHEET", "pick": "NO", "team": "AWAY"}
+
+    # ═══ First/Last Team to Score ═══
+    if s in ("FIRST GOAL HOME", "1ST GOAL 1", "FIRST GOAL 1"):
+        return {"market": "FIRST_TEAM_TO_SCORE", "pick": "HOME"}
+    if s in ("FIRST GOAL AWAY", "1ST GOAL 2", "FIRST GOAL 2"):
+        return {"market": "FIRST_TEAM_TO_SCORE", "pick": "AWAY"}
+    if s in ("NO GOAL", "NO GOALS", "0:0"):
+        return {"market": "FIRST_TEAM_TO_SCORE", "pick": "NONE"}
+    if s in ("LAST GOAL HOME", "LAST GOAL 1"):
+        return {"market": "LAST_TEAM_TO_SCORE", "pick": "HOME"}
+    if s in ("LAST GOAL AWAY", "LAST GOAL 2"):
+        return {"market": "LAST_TEAM_TO_SCORE", "pick": "AWAY"}
+
+    # ═══ Highest Scoring Half ═══
+    if s in ("1ST HALF HIGHEST", "HSH 1ST", "HSH 1", "HIGHEST 1ST"):
+        return {"market": "HIGHEST_SCORING_HALF", "pick": "FIRST"}
+    if s in ("2ND HALF HIGHEST", "HSH 2ND", "HSH 2", "HIGHEST 2ND"):
+        return {"market": "HIGHEST_SCORING_HALF", "pick": "SECOND"}
+    if s in ("HSH EQUAL", "EQUAL HALVES", "HSH X"):
+        return {"market": "HIGHEST_SCORING_HALF", "pick": "EQUAL"}
+
+    # Could not parse — return raw
+    return {"market": "UNMAPPED", "pick": s}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Smart validation models — accept Date + Event + Bet like bookmaker slips
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class SmartBetRow(BaseModel):
+    date: str = Field(min_length=1, description="Match date DD-MM-YYYY or DD/MM/YYYY")
+    event: str = Field(min_length=1, description="e.g. Napoli - Como")
+    bet: str = Field(min_length=1, description="e.g. 1, X, 2, OVER 2.5, GG")
+    odds: Optional[float] = Field(default=None, description="Odds (informational)")
+
+
+class SmartValidationRequest(BaseModel):
+    rows: List[SmartBetRow] = Field(min_length=1)
+    base_url: Optional[str] = Field(default=None)
+    api_key: Optional[str] = Field(default=None)
+
+
+def _parse_date(raw: str) -> str:
+    """Convert DD-MM-YYYY or DD/MM/YYYY to YYYY-MM-DD for API-Football."""
+    s = raw.strip().replace("/", "-")
+    parts = s.split("-")
+    if len(parts) == 3:
+        if len(parts[0]) == 4:  # already YYYY-MM-DD
+            return s
+        return f"{parts[2]}-{parts[1]}-{parts[0]}"
+    raise ValueError(f"Cannot parse date: {raw}")
+
+
+def _parse_event(event: str) -> tuple[str, str]:
+    """Split 'Home Team - Away Team' into (home, away).
+    Handles double dashes like 'Udinese - - Atalanta' too."""
+    # Normalize multiple dashes/spaces: "Udinese - - Atalanta" → "Udinese - Atalanta"
+    import re as _re
+    cleaned = _re.sub(r'\s*-\s*-\s*', ' - ', event.strip())
+    cleaned = _re.sub(r'\s*–\s*', ' - ', cleaned)  # en-dash
+    cleaned = _re.sub(r'\s*—\s*', ' - ', cleaned)  # em-dash
+
+    for sep in [" - ", " vs ", " v "]:
+        if sep in cleaned:
+            parts = cleaned.split(sep, 1)
+            home = parts[0].strip()
+            away = parts[1].strip()
+            if home and away:
+                return home, away
+    # fallback: split on "-"
+    if "-" in cleaned:
+        idx = cleaned.index("-")
+        home = cleaned[:idx].strip()
+        away = cleaned[idx + 1:].strip()
+        if home and away:
+            return home, away
+    raise ValueError(f"Cannot parse event: {event}. Use 'Home - Away' format.")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 #  FastAPI app
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -653,6 +1098,15 @@ def _run_validation(base_url: str, api_key: Optional[str], selections: List[Sele
 
 
 app = FastAPI(title="Betslip Validator API", version="2.0.0")
+
+_STATIC_DIR = Path(__file__).resolve().parent / "static"
+if _STATIC_DIR.is_dir():
+    app.mount("/static", StaticFiles(directory=str(_STATIC_DIR), html=True), name="static")
+
+
+@app.get("/")
+def root():
+    return RedirectResponse(url="/static/index.html")
 
 
 @app.get("/health")
@@ -717,3 +1171,124 @@ def validate_betslip_table(payload: TableValidationRequest) -> dict:
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return _run_validation(base_url, payload.api_key, selections)
+
+
+# ── Smart endpoint: Date + Event + Bet ──────────────────────────────────────
+
+
+@app.post("/validate-betslip/smart")
+def validate_betslip_smart(payload: SmartValidationRequest) -> dict:
+    """
+    Accept bets in bookmaker format: date, event name, bet string.
+    Auto-resolves fixture IDs and detects markets.
+    """
+    base_url = payload.base_url or os.getenv("API_BASE_URL", "").strip()
+    if not base_url:
+        raise HTTPException(status_code=400, detail="Missing base_url. Provide it or set API_BASE_URL.")
+    api_key = payload.api_key or os.getenv("API_SPORTS_KEY", "").strip()
+
+    try:
+        client = APISportsClient(base_url=base_url, api_key=api_key)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    selections: list[Selection] = []
+    resolution_log: list[dict] = []
+
+    for row in payload.rows:
+        # Parse date
+        try:
+            api_date = _parse_date(row.date)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+        # Parse event
+        try:
+            home_name, away_name = _parse_event(row.event)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+        # Find fixture
+        fx = client.find_fixture(home_name, away_name, api_date)
+        if fx is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Could not find fixture for '{row.event}' on {row.date}. "
+                       f"Check team names and date."
+            )
+
+        fixture_id = fx["fixture_id"]
+        swapped = fx.get("_swapped", False)
+
+        # Parse bet string → market + pick + line
+        parsed = parse_raw_bet(row.bet)
+        market = _normalize_market(parsed["market"])
+        pick = parsed["pick"]
+        line = parsed.get("line")
+
+        # If teams were swapped AND bet is directional, flip pick
+        if swapped and pick in ("HOME", "AWAY"):
+            pick = "AWAY" if pick == "HOME" else "HOME"
+
+        # Build selection
+        sel = Selection(
+            fixture_id=fixture_id,
+            market=market,
+            pick=pick,
+            line=line,
+            team=None,
+        )
+        selections.append(sel)
+
+        resolution_log.append({
+            "input_event": row.event,
+            "input_date": row.date,
+            "input_bet": row.bet,
+            "resolved_fixture_id": fixture_id,
+            "resolved_match": f"{fx.get('home_team', '?')} vs {fx.get('away_team', '?')}",
+            "resolved_market": market.value,
+            "resolved_pick": pick,
+            "resolved_line": line,
+            "odds": row.odds,
+        })
+
+    try:
+        result = evaluate_betslip(client, selections)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Settlement error: {exc}") from exc
+
+    # Merge resolution info into results
+    for i, res in enumerate(result.get("results", [])):
+        if i < len(resolution_log):
+            res["event"] = resolution_log[i]["input_event"]
+            res["date"] = resolution_log[i]["input_date"]
+            res["input_bet"] = resolution_log[i]["input_bet"]
+            res["resolved_match"] = resolution_log[i]["resolved_match"]
+            res["odds"] = resolution_log[i]["odds"]
+
+    result["resolution"] = resolution_log
+    return result
+
+
+@app.post("/search-fixture")
+def search_fixture(event: str, date: str, base_url: Optional[str] = None, api_key: Optional[str] = None) -> dict:
+    """Search for a fixture by team names and date."""
+    base_url = base_url or os.getenv("API_BASE_URL", "").strip()
+    api_key = api_key or os.getenv("API_SPORTS_KEY", "").strip()
+    if not base_url:
+        raise HTTPException(status_code=400, detail="Missing base_url.")
+    try:
+        client = APISportsClient(base_url=base_url, api_key=api_key)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    try:
+        api_date = _parse_date(date)
+        home_name, away_name = _parse_event(event)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    fx = client.find_fixture(home_name, away_name, api_date)
+    if fx is None:
+        raise HTTPException(status_code=404, detail=f"No fixture found for '{event}' on {date}")
+    return fx

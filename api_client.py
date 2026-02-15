@@ -163,6 +163,128 @@ class APISportsClient:
             offsides_away=away_stats.get("OFFSIDES"),
         )
 
+    # ── team search ──────────────────────────────────────────────────────────
+
+    def search_teams(self, name: str) -> list[dict[str, Any]]:
+        """Search teams by name. Returns list of {id, name, country, ...}."""
+        payload = self._get("teams", {"search": name})
+        results: list[dict[str, Any]] = []
+        for row in payload.get("response", []):
+            team = row.get("team", {})
+            results.append({
+                "id": team.get("id"),
+                "name": team.get("name"),
+                "country": team.get("country"),
+                "logo": team.get("logo"),
+            })
+        return results
+
+    # ── fixture search ───────────────────────────────────────────────────────
+
+    def search_fixtures(self, team_id: int, date: str) -> list[dict[str, Any]]:
+        """Search fixtures for a team on a specific date (YYYY-MM-DD).
+        Auto-derives season from date (European football: Aug-Dec = year, Jan-Jul = year-1)."""
+        # Derive season from date
+        parts = date.split("-")
+        year = int(parts[0])
+        month = int(parts[1])
+        season = year if month >= 7 else year - 1
+
+        results: list[dict[str, Any]] = []
+        # Try the derived season and also the alternate one
+        for s in [season, season + 1 if month >= 7 else season - 1]:
+            payload = self._get("fixtures", {"team": team_id, "date": date, "season": s})
+            for row in payload.get("response", []):
+                fixture = row.get("fixture", {})
+                teams = row.get("teams", {})
+                goals = row.get("goals", {})
+                league = row.get("league", {})
+                status = (fixture.get("status", {}) or {}).get("short", "")
+                results.append({
+                    "fixture_id": fixture.get("id"),
+                    "date": fixture.get("date"),
+                    "status": status,
+                    "home_team": (teams.get("home") or {}).get("name"),
+                    "home_team_id": (teams.get("home") or {}).get("id"),
+                    "away_team": (teams.get("away") or {}).get("name"),
+                    "away_team_id": (teams.get("away") or {}).get("id"),
+                    "home_goals": goals.get("home"),
+                    "away_goals": goals.get("away"),
+                    "league": league.get("name"),
+                    "country": league.get("country"),
+                })
+            if results:
+                break  # found fixtures, no need to try alternate season
+        return results
+
+    def find_fixture(self, home_name: str, away_name: str, date: str) -> dict[str, Any] | None:
+        """
+        Find a fixture by team names and date.
+        1. Try local teams DB to resolve team IDs (no API calls)
+        2. Search fixtures by team_id + date
+        3. Fall back to API team search if local DB miss
+        """
+        from teams_db import lookup_team_id
+
+        def _normalise(s: str) -> str:
+            return s.strip().lower().replace(".", "").replace("'", "")
+
+        h_norm = _normalise(home_name)
+        a_norm = _normalise(away_name)
+
+        # 1. Try local DB lookup
+        home_id = lookup_team_id(home_name)
+        away_id = lookup_team_id(away_name)
+
+        # Try with whichever team ID we found
+        for team_id in [tid for tid in [home_id, away_id] if tid is not None]:
+            fixtures = self.search_fixtures(team_id, date)
+            for fx in fixtures:
+                fx_h = _normalise(fx.get("home_team") or "")
+                fx_a = _normalise(fx.get("away_team") or "")
+                # Check if both teams match (either direction)
+                if self._teams_match(h_norm, fx_h) and self._teams_match(a_norm, fx_a):
+                    return fx
+                if self._teams_match(h_norm, fx_a) and self._teams_match(a_norm, fx_h):
+                    fx["_swapped"] = True
+                    return fx
+            # If only one fixture on that date for this team, it's likely the one
+            if len(fixtures) == 1:
+                return fixtures[0]
+
+        # 2. Fall back to API team search (uses 1 extra API call)
+        if home_id is None:
+            api_results = self.search_teams(home_name.strip())
+            for team in api_results[:3]:
+                fixtures = self.search_fixtures(team["id"], date)
+                for fx in fixtures:
+                    fx_h = _normalise(fx.get("home_team") or "")
+                    fx_a = _normalise(fx.get("away_team") or "")
+                    if self._teams_match(h_norm, fx_h) and self._teams_match(a_norm, fx_a):
+                        return fx
+                    if self._teams_match(h_norm, fx_a) and self._teams_match(a_norm, fx_h):
+                        fx["_swapped"] = True
+                        return fx
+
+        return None
+
+    @staticmethod
+    def _teams_match(input_name: str, fixture_name: str) -> bool:
+        """Check if two team names likely refer to the same team."""
+        if not input_name or not fixture_name:
+            return False
+        if input_name == fixture_name:
+            return True
+        if input_name in fixture_name or fixture_name in input_name:
+            return True
+        # Strip common decorators and try again
+        from teams_db import _strip_decorators
+        a = _strip_decorators(input_name)
+        b = _strip_decorators(fixture_name)
+        if a and b and (a in b or b in a):
+            return True
+        return False
+
     # ── odds catalog ─────────────────────────────────────────────────────────
 
     def get_odds_bets_catalog(self) -> list[dict[str, Any]]:
