@@ -702,11 +702,11 @@ _2H_GG_RE = re.compile(
     re.IGNORECASE,
 )
 _RESULT_BTTS_RE = re.compile(
-    r"^(1|X|2|HOME|DRAW|AWAY)\s*[/&+]\s*(GG|NG|YES|NO|BTTS)$",
+    r"^(1|X|2|HOME|DRAW|AWAY)\s*[/&+\s]\s*(GG|NG|YES|NO|BTTS)$",
     re.IGNORECASE,
 )
 _RESULT_OU_RE = re.compile(
-    r"^(1|X|2|HOME|DRAW|AWAY)\s*[/&+]\s*(OVER|UNDER|O|U)\s*(\d+(?:\.\d+)?)$",
+    r"^(1|X|2|HOME|DRAW|AWAY)\s*[/&+\s]\s*(OVER|UNDER|O|U)\s*(\d+(?:\.\d+)?)$",
     re.IGNORECASE,
 )
 
